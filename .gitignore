@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+#Agents 
+*.claude 
+*.codegraph 
+*.cursor
+*.kiro
+*.gemini 
+GEMINI.md
+*.mcp.json
