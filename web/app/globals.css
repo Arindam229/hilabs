@@ -1,0 +1,12 @@
+:root { color-scheme: dark; --bg: #0a1020; --panel: #141d32; --line: #2a385a; --text: #f3f6fc; --muted: #a6b2cd; --accent: #55e0a3; --danger: #ff8390; }
+* { box-sizing: border-box; }
+body { margin: 0; background: radial-gradient(circle at 20% 0%, #183259, var(--bg) 42rem); color: var(--text); font-family: Arial, sans-serif; }
+main { max-width: 1000px; margin: 0 auto; padding: 72px 24px; }
+header { max-width: 680px; margin-bottom: 36px; }
+h1 { font-size: clamp(2.4rem, 6vw, 4.8rem); line-height: .95; letter-spacing: -.06em; margin: 8px 0 18px; }
+h2 { margin: 0 0 8px; } p { color: var(--muted); line-height: 1.55; } .eyebrow { color: var(--accent); font-size: .72rem; font-weight: 700; letter-spacing: .14em; }
+.upload-card, .results, .metric { background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line); border-radius: 16px; }
+.upload-card { padding: 24px; display: grid; gap: 14px; max-width: 620px; } label { font-weight: 700; } input { color: var(--muted); } button, .export { width: fit-content; border: 0; border-radius: 8px; padding: 11px 15px; background: var(--accent); color: #092017; font-weight: 800; cursor: pointer; text-decoration: none; } button:disabled { opacity: .5; cursor: wait; } small { color: var(--muted); }.error { color: var(--danger); margin: 0; }
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 28px 0; align-items: stretch; }.metric { padding: 18px; display: grid; gap: 5px; }.metric span { color: var(--muted); font-size: .8rem; }.metric strong { font-size: 2rem; }.export { display: grid; place-items: center; text-align: center; }
+.results { padding: 24px; }.table-wrap { overflow-x: auto; margin-top: 16px; }table { width: 100%; border-collapse: collapse; } th, td { padding: 12px 8px; border-bottom: 1px solid var(--line); text-align: left; }th { color: var(--muted); font-size: .75rem; letter-spacing: .07em; text-transform: uppercase; }
+@media (max-width: 680px) { main { padding-top: 40px; }.metrics { grid-template-columns: 1fr 1fr; }.export { min-height: 70px; } }
