@@ -13,7 +13,7 @@ def main() -> None:
     parser.add_argument("stage", choices=("c1", "c2", "all"))
     args = parser.parse_args()
     cfg = load_config()
-    if args.stage in {"c1", "all"}:
+    if args.stage in {"c1", "c2", "all"}:
         result = run_c1(cfg)
         print(f"{result.stage}: {result.counts}")
     if args.stage in {"c2", "all"}:

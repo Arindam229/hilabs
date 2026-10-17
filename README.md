@@ -1,48 +1,67 @@
-# HiLabs
+# HiLabs Provider Rates
 
-Local-first skeleton for data-quality hackathon problem statements.
+Local-first Centene Price Transparency Data pipeline. Raw data stays outside Git.
 
-## Default workflow
+## Generate C1, then C2
 
-```text
-CSV upload -> validate -> normalize -> audit/review queue -> export
+`make c2` always rebuilds C1 from raw source archive before classifying C2.
+
+1. Put `hilabs_dataset_2026-10-17.zip` in one directory. Archive must contain
+   Centene index JSON files at `centene/index/*.json`.
+2. Run:
+
+```bash
+cd /home/redacted/Desktop/projects/hilabs
+make setup
+PTD_DATA_DIR="/absolute/path/to/archive-directory" make c2
 ```
 
-PS-specific matching, reference validation, ranking, and AI assistance attach after this working path. Raw rows remain preserved; every normalization carries reason codes and review status.
+`PTD_DATA_DIR` points to directory containing archive, not archive path. Change
+`sources.archive` in `config.yaml` if source archive has another name.
 
-## Stack
+Pipeline stages:
 
-- API: Python 3.11, FastAPI, Pydantic
-- Data: Pandas, RapidFuzz, DuckDB, OpenPyXL — added only when PS needs them
-- UI: Next.js, TypeScript, CSS
-- Packaging: Docker Compose
-- Tests: stdlib `unittest` now; add `pytest` when dependencies install
+```text
+raw ZIP -> C1 plans + deduplicated rate files -> C2 PPO classification -> Excel
+```
 
-## Run
+Outputs:
+
+```text
+data/stage/c1/plans.parquet           C1: plan-to-rate-file mapping
+data/stage/c1/rate_files.parquet      C1: unique physical rate-file queue
+data/stage/c1/_manifest.json          C1: source/count evidence
+data/stage/c2/plan_network.parquet    C2: every plan classification
+data/stage/c2/rate_files.parquet      C2: deduplicated PPO candidate files
+data/out/c2_ppo_network.xlsx          C2 deliverable workbook
+```
+
+`c2_ppo_network.xlsx` has two sheets:
+
+- `Plan classification`: every parsed plan, rule ID, confidence.
+- `PPO rate files`: unique rate URLs for downstream streaming.
+
+PPO is plan-level classification only. Shared rate file can serve multiple plan
+types; provider membership needs later rate-file evidence.
+
+Run C1 only:
+
+```bash
+PTD_DATA_DIR="/absolute/path/to/archive-directory" make c1
+```
+
+Run checks:
 
 ```bash
 make test
-docker compose up --build
 ```
 
-- UI: `http://localhost:3000`
-- API docs: `http://localhost:8000/docs`
-- API health: `http://localhost:8000/health`
-
-## Structure
+## Repository layout
 
 ```text
-api/app/       API, parser, pure pipeline, export store
-api/tests/     core behavior tests
-web/app/       upload and evidence-queue dashboard
-data/          local fixtures/reference files, never committed if sensitive
-docs/          PS intake and decisions
+pipeline/stages/c1_index.py      C1 streaming index parser
+pipeline/stages/c2_network.py    C2 PPO classification + Excel export
+tests/                           C1/C2/command behavior tests
+data/                            local sources and ignored run artifacts
+docs/                            PS scope and rule decisions
 ```
-
-## PS release sequence
-
-1. Read `docs/PS_CHECKLIST.md`.
-2. Freeze schema and hard constraints in tests.
-3. Add deterministic PS stages under `api/app/`.
-4. Connect live metrics to UI. No mock metric fallback.
-5. Run clean Docker smoke test, export, and demo.
