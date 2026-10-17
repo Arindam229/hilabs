@@ -227,3 +227,7 @@ __marimo__/
 *.gemini 
 GEMINI.md
 *.mcp.json
+
+# PTD pipeline runtime data (large public files, never commit)
+/data/*
+!/data/.gitkeep
