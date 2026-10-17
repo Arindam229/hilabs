@@ -1,0 +1,136 @@
+{
+  "reporting_entity_name": "Test Payer",
+  "reporting_entity_type": "Third Party Administrator",
+  "version": "2.0.0",
+  "last_updated_on": "2026-10-06",
+  "provider_references": [
+    {
+      "provider_group_id": 5,
+      "network_name": [],
+      "provider_groups": [
+        {
+          "npi": [1111111111, 2222222222],
+          "tin": {
+            "type": "ein",
+            "value": "12-345",
+            "business_name": "Group A"
+          }
+        }
+      ]
+    },
+    {
+      "provider_group_id": 2,
+      "network_name": [],
+      "provider_groups": [
+        {
+          "npi": [3333333333],
+          "tin": {
+            "type": "ein",
+            "value": "99-999",
+            "business_name": "Group B"
+          }
+        }
+      ]
+    }
+  ],
+  "in_network": [
+    {
+      "name": "Office visit",
+      "description": "Office visit description",
+      "billing_code": "99213",
+      "billing_code_type": "CPT",
+      "billing_code_type_version": "2024",
+      "negotiation_arrangement": "ffs",
+      "negotiated_rates": [
+        {
+          "provider_references": [5],
+          "negotiated_prices": [
+            {
+              "negotiated_type": "negotiated",
+              "negotiated_rate": 100.0,
+              "expiration_date": "9999-12-31",
+              "service_code": ["11"],
+              "billing_class": "professional",
+              "setting": "outpatient",
+              "billing_code_modifier": ["25"]
+            },
+            {
+              "negotiated_type": "negotiated",
+              "negotiated_rate": 120.0,
+              "expiration_date": "9999-12-31",
+              "service_code": ["11"],
+              "billing_class": "institutional",
+              "setting": "outpatient"
+            }
+          ]
+        },
+        {
+          "provider_references": [2],
+          "negotiated_prices": [
+            {
+              "negotiated_type": "fee schedule",
+              "negotiated_rate": 90.0,
+              "expiration_date": "9999-12-31",
+              "service_code": ["11"],
+              "billing_class": "professional",
+              "setting": "outpatient"
+            }
+          ]
+        },
+        {
+          "provider_references": [999],
+          "negotiated_prices": [
+            {
+              "negotiated_type": "negotiated",
+              "negotiated_rate": 50.0,
+              "expiration_date": "9999-12-31",
+              "service_code": ["11"],
+              "billing_class": "professional",
+              "setting": "outpatient"
+            }
+          ]
+        },
+        {
+          "provider_references": [5],
+          "negotiated_prices": [
+            {
+              "negotiated_type": "negotiated",
+              "negotiated_rate": null,
+              "expiration_date": "9999-12-31",
+              "service_code": ["11"],
+              "billing_class": "professional",
+              "setting": "outpatient"
+            }
+          ]
+        },
+        {
+          "provider_references": [2],
+          "negotiated_prices": [
+            {
+              "negotiated_type": "negotiated",
+              "negotiated_rate": 0,
+              "expiration_date": "9999-12-31",
+              "service_code": ["11"],
+              "billing_class": "professional",
+              "setting": "outpatient"
+            }
+          ]
+        },
+        {
+          "provider_references": [5],
+          "negotiated_prices": [
+            {
+              "negotiated_type": "negotiated",
+              "negotiated_rate": 100.0,
+              "expiration_date": "9999-12-31",
+              "service_code": ["11"],
+              "billing_class": "professional",
+              "setting": "outpatient",
+              "billing_code_modifier": ["25"]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
