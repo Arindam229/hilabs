@@ -112,10 +112,19 @@ def unique_rate_files(rows: list[dict[str, str]]) -> list[dict[str, object]]:
 
 
 def _matching_members(archive: zipfile.ZipFile, patterns: tuple[str, ...]) -> list[str]:
+    # Archive members may be stored under a top-level directory (e.g.
+    # ``hilabs_dataset_.../centene/index/...``). Match the configured
+    # relative pattern with or without that leading directory so the
+    # default data layout keeps working.
+    expanded: list[str] = []
+    for pattern in patterns:
+        expanded.append(pattern)
+        if not pattern.startswith("*"):
+            expanded.append("*" + pattern)
     return [
         name
         for name in archive.namelist()
-        if any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+        if any(fnmatch.fnmatch(name, pattern) for pattern in expanded)
     ]
 
 

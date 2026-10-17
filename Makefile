@@ -1,4 +1,7 @@
-.PHONY: setup test c1 c2 pipeline api web up
+PTD_DATA_DIR ?= $(CURDIR)/data
+export PTD_DATA_DIR
+
+.PHONY: setup test c1 c2 pipeline
 
 setup:
 	uv sync --all-groups
@@ -13,14 +16,4 @@ c1:
 c2:
 	uv run python -m pipeline c2
 
-pipeline:
-	uv run python -m pipeline all
-
-api:
-	uvicorn app.main:app --app-dir api --reload
-
-web:
-	cd web && npm run dev
-
-up:
-	docker compose up --build
+pipeline: c2
