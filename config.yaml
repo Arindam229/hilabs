@@ -1,0 +1,11 @@
+data_dir: data
+sources:
+  archive: hilabs_dataset_2026-10-17.zip
+  index_members:
+    - centene/index/*.json
+  c2_evidence_members: []
+scope:
+  payer: Centene
+  state: CA
+  market: group
+  network: PPO

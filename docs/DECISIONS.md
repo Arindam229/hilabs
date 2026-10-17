@@ -22,3 +22,10 @@ Template:
 - **Evidence:** `DATA_FINDINGS.md` size check (HTTP content-length 701,615,514).
 - **Alternatives rejected:** `json.load` (memory ∝ file size); pandas `read_json` (same).
 - **Confidence / risk:** High.
+
+### R-C1-01 — Preserve plan-to-file mapping, queue unique physical files
+- **Rule:** C1 keeps one row per distinct plan/file pair and emits a separate unique rate-file table.
+- **Why:** C2 needs plan-level evidence; later stages must not stream one physical file repeatedly.
+- **Evidence:** Written by C1 manifest at execution time.
+- **Alternatives rejected:** URL-only C1 table loses required plan ID and plan name.
+- **Confidence / risk:** High; source index structure is explicit.

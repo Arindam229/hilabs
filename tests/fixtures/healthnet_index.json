@@ -1,0 +1,40 @@
+{
+  "reporting_entity_name": "Health Net",
+  "reporting_structure": [
+    {
+      "reporting_plans": [
+        {
+          "plan_name": "CA Group PPO 250",
+          "plan_id": "67138CA001",
+          "plan_id_type": "hios",
+          "plan_market_type": "group",
+          "issuer_name": "Health Net"
+        },
+        {
+          "plan_name": "CA Group PPO 250",
+          "plan_id": "67138CA001",
+          "plan_id_type": "hios",
+          "plan_market_type": "group",
+          "issuer_name": "Health Net"
+        }
+      ],
+      "in_network_files": [
+        {"description": "California rates", "location": "https://example.test/healthnet-ca.json"}
+      ]
+    },
+    {
+      "reporting_plans": [
+        {
+          "plan_name": "OR Group PPO 500",
+          "plan_id": "67138OR002",
+          "plan_id_type": "hios",
+          "plan_market_type": "group",
+          "issuer_name": "Health Net"
+        }
+      ],
+      "in_network_files": [
+        {"description": "Oregon rates", "location": "https://example.test/healthnet-or.json"}
+      ]
+    }
+  ]
+}
