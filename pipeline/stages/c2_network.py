@@ -91,7 +91,7 @@ def unique_ppo_rate_files(rows: list[dict[str, str]]) -> list[dict[str, object]]
             "rate_file_url": url,
             "associated_ppo_plan_count": len(group),
             "sample_plan_name": min(row["plan_name"] for row in group),
-            "queue_reason_code": "R-C2-05-CANDIDATE_FILE",
+            "queue_reason_code": "R-C2-07-CANDIDATE_FILE",
         }
         for url, group in sorted(grouped.items())
     ]
@@ -155,7 +155,7 @@ def run_c2(cfg: Config) -> StageResult:
     excel_path = cfg.data_dir / "out" / "c2_ppo_network.xlsx"
     _write_parquet(plan_network_path, plans, NETWORK_COLUMNS)
     _write_parquet(rate_files_path, rate_files, RATE_FILE_COLUMNS)
-    _write_excel(excel_path, plans, rate_files)
+    _write_excel(excel_path, [row for row in plans if row["network_type"] == "PPO"], rate_files)
     counts = Counter(row["network_type"] for row in plans)
     summary = {
         "plans_classified": len(plans),

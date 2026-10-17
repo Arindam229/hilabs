@@ -50,7 +50,7 @@ def test_unique_ppo_rate_files_deduplicates_queue_and_keeps_plan_evidence():
             "rate_file_url": "https://example.test/healthnet-ca.json",
             "associated_ppo_plan_count": 2,
             "sample_plan_name": "CA CUSPPO 15/250",
-            "queue_reason_code": "R-C2-05-CANDIDATE_FILE",
+            "queue_reason_code": "R-C2-07-CANDIDATE_FILE",
         }
     ]
 
@@ -79,6 +79,7 @@ def test_run_c2_writes_excel_from_c1_plan_table(tmp_path: Path):
     workbook = load_workbook(data_dir / "out" / "c2_ppo_network.xlsx", read_only=True)
     assert workbook.sheetnames == ["Plan classification", "PPO rate files"]
     rows = list(workbook["Plan classification"].values)
+    assert len(rows) == 2
     assert rows[0] == (
         "Brand",
         "Plan name",
