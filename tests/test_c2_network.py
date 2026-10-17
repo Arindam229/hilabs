@@ -30,6 +30,8 @@ def test_c2_restrictive_tokens_override_ppo_token():
 
     assert classified["network_type"] == "EPO"
     assert classified["reason_code"] == "R-C2-03-RESTRICTIVE_TOKEN"
+    assert classify_plan(_plan("CA L CUS PPO CA IRONWORKERS FWP EPO$15"))["network_type"] == "EPO"
+    assert classify_plan(_plan("CA L CUS PPO CA IRONWORKERS FWP-EPO$10"))["network_type"] == "EPO"
 
 
 def test_c2_keeps_non_group_non_ca_and_ambiguous_plans_out_of_ppo_queue():

@@ -45,9 +45,9 @@ Template:
 - **Confidence / risk:** High for explicit CA identifiers; ambiguous names remain unresolved.
 
 ### R-C2-03 — Restrictive network tokens override PPO tokens
-- **Rule:** A California commercial-group plan containing `POS`, `EPO`, `HMO`, `WholeCare`, `SmartCare`, `CommunityCare`, or `Salud` is classified as that restrictive network even when `PPO` also appears.
+- **Rule:** Scan entire plan name, including suffixes and punctuation-separated words. A California commercial-group plan containing `POS`, `EPO`, `HMO`, `WholeCare`, `SmartCare`, `CommunityCare`, or `Salud` is classified as that restrictive network even when `PPO` also appears. Thus `EPO$15` and `FWP-EPO$10` are EPO, not PPO.
 - **Why:** Employer/account labels can contain PPO while final benefit design is EPO, HMO, or POS. Restrictive benefit tokens are stronger evidence than a broad account token.
-- **Evidence:** Fixture case `CA L CUS PPO SACRAMENTO CITY USD EPO`; `pytest tests/test_c2_network.py -q`.
+- **Evidence:** Fixture cases `CA L CUS PPO SACRAMENTO CITY USD EPO`, `... EPO$15`, and `... FWP-EPO$10`; `pytest tests/test_c2_network.py -q`.
 - **Alternatives rejected:** First-match PPO token; it misclassifies conflicting names.
 - **Confidence / risk:** High for explicit tokens. It does not prove rate-level membership in shared files.
 
