@@ -29,3 +29,17 @@ Template:
 - **Evidence:** Written by C1 manifest at execution time.
 - **Alternatives rejected:** URL-only C1 table loses required plan ID and plan name.
 - **Confidence / risk:** High; source index structure is explicit.
+
+### R-C2-01 — Restrictive network tokens override PPO tokens
+- **Rule:** A California commercial-group plan containing `POS`, `EPO`, `HMO`, `WholeCare`, `SmartCare`, `CommunityCare`, or `Salud` is classified as that restrictive network even when `PPO` also appears.
+- **Why:** Employer/account labels can contain PPO while final benefit design is EPO, HMO, or POS. Restrictive benefit tokens are stronger evidence than a broad account token.
+- **Evidence:** Fixture case `CA L CUS PPO SACRAMENTO CITY USD EPO`; `pytest tests/test_c2_network.py -q`.
+- **Alternatives rejected:** First-match PPO token; it misclassifies conflicting names.
+- **Confidence / risk:** High for explicit tokens. It does not prove rate-level membership in shared files.
+
+### R-C2-02 — Keep unverified network labels unresolved
+- **Rule:** `EOA` and plan names without a confirmed token stay `UNRESOLVED`; explicit PPO plan names become candidate files only.
+- **Why:** Health Net California PPO, HMO, and other plans share a physical rate file. Plan names alone cannot prove individual rate membership.
+- **Evidence:** `docs/ps/DATA_FINDINGS.md` verified shared CA rate file; C2 Excel records confidence and rule ID.
+- **Alternatives rejected:** Inferring EOA means EPO or treating a shared file as all-PPO without in-file evidence.
+- **Confidence / risk:** Deliberately conservative; C2 evidence pass must validate provider-group or schedule keys.

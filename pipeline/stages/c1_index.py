@@ -120,10 +120,10 @@ def _matching_members(archive: zipfile.ZipFile, patterns: tuple[str, ...]) -> li
 
 
 def _write_parquet(path: Path, rows: list[dict[str, object]], columns: tuple[str, ...]) -> None:
-    fields = [pa.field(column, pa.string()) for column in columns]
+    count_columns = {"associated_plan_count", "associated_ppo_plan_count"}
     fields = [
-        pa.field("associated_plan_count", pa.int64()) if field.name == "associated_plan_count" else field
-        for field in fields
+        pa.field(column, pa.int64()) if column in count_columns else pa.field(column, pa.string())
+        for column in columns
     ]
     table = pa.Table.from_pylist(rows, schema=pa.schema(fields))
     pq.write_table(table, path, compression="zstd")
