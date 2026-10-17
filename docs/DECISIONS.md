@@ -78,3 +78,89 @@ Template:
 - **Evidence:** `pytest tests/test_c2_network.py -q` verifies PPO-only Excel output and URL deduplication.
 - **Alternatives rejected:** Re-streaming the same physical rate file for each PPO plan, or showing HMO/EPO/POS records in PPO export.
 - **Confidence / risk:** High for plan-level workbook scope; in-file evidence still controls rate extraction.
+
+### R-C4-01 — Stream provider references and in_network separately
+- **Rule:** C4 builds the `provider_group_id` lookup from one streaming pass over
+  `provider_references`, then streams `in_network` in a second pass. The full TiC
+  document is never loaded into a Python object.
+- **Why:** The Health Net CA file is ~670 MB; memory must stay flat.
+- **Evidence:** Real run processed 1,717 service entries and 1,511,720 output rows.
+- **Alternatives rejected:** `json.load()` / pandas `read_json`.
+- **Confidence / risk:** High.
+
+### R-C4-02 — Resolve provider groups by exact ID
+- **Rule:** `provider_group_id` values are dictionary keys; array position and numeric
+  order are never used. Missing IDs are counted as unresolved and produce no rows.
+- **Why:** Provider group IDs are identifiers, not offsets.
+- **Evidence:** Synthetic test uses IDs 5 and 2 out of order.
+- **Alternatives rejected:** Index-based lookup.
+- **Confidence / risk:** High.
+
+### R-C4-03 — Preserve NPI and TIN as strings
+- **Rule:** NPI and TIN values are converted to strings in every output.
+- **Why:** Leading zeros and formatting must survive CSV round-trips.
+- **Evidence:** Synthetic test checks `12-345` and `111`.
+- **Alternatives rejected:** Numeric identifiers.
+- **Confidence / risk:** High.
+
+### R-C4-04 — Preserve all negotiated prices
+- **Rule:** Every `negotiated_prices` entry is emitted; no cheapest/highest/median
+  selection occurs in `raw_rates.csv`.
+- **Why:** C3 and later stages need the full pricing distribution.
+- **Evidence:** Real run emitted 1,511,720 rows from 1,500,288 prices.
+- **Alternatives rejected:** Early rate selection in extraction.
+- **Confidence / risk:** High.
+
+### R-C4-05 — Count invalid, zero and negative rates without dropping them
+- **Rule:** Missing/non-numeric rates are counted in `missing_invalid_nonnumeric_rates`;
+  zero and negative rates are counted separately. Rows are still written to
+  `raw_rates.csv` with the original rate text.
+- **Why:** C3 grades file quality on these signals.
+- **Evidence:** Real run had 0 invalid, 0 zero and 0 negative rates.
+- **Alternatives rejected:** Silently excluding defective rows.
+- **Confidence / risk:** High.
+
+### R-C4-06 — Track unresolved references
+- **Rule:** A `provider_references` ID absent from the lookup increments
+  `unresolved_provider_references` and `records_rejected`; no NPI/TIN is invented.
+- **Why:** Referential integrity must be visible.
+- **Evidence:** Synthetic test has one unresolved reference (ID 999).
+- **Alternatives rejected:** Emitting placeholder providers.
+- **Confidence / risk:** High.
+
+### R-C4-07 — `9999-12-31` is not staleness proof
+- **Rule:** Expiration dates are preserved but never interpreted as staleness.
+- **Why:** Every Health Net CA price expires on `9999-12-31`.
+- **Evidence:** `DATA_FINDINGS.md`.
+- **Alternatives rejected:** Filtering on expiration date.
+- **Confidence / risk:** High.
+
+### R-C4-08 — Exact-duplicate detection key
+- **Rule:** Exact duplicates require equality across provider identifiers, billing code
+  and type, negotiated amount, rate type, billing class, setting, modifiers and other
+  pricing attributes (service code, additional information, expiration date, etc.).
+- **Why:** C3 measures source duplication precisely.
+- **Evidence:** Real run found 12,732 exact duplicate rows.
+- **Alternatives rejected:** Keying only on NPI/TIN/code/rate.
+- **Confidence / risk:** High.
+
+### R-C4-09 — Curated selection key and rules
+- **Rule:** `c4result.csv` keeps one row per `(npi, tin, billing_code, billing_code_type,
+  billing_code_type_version)` after exact-duplicate removal. Selection order:
+  negotiated type, fewer modifiers, professional billing class, most common rate,
+  highest rate, then deterministic first row. Every non-selected candidate is written
+  to `c4_selection_audit.csv`.
+- **Why:** PS requires stating which rate is kept and why.
+- **Evidence:** Real run curated 21,858 rows from 1,511,720 extracted rows.
+- **Alternatives rejected:** Cheapest/median/highest-only selection without justification.
+- **Confidence / risk:** Medium; selection policy is documented and auditable.
+
+### R-C4-10 — Exclude non-10-digit NPIs from curated output only
+- **Rule:** `raw_rates.csv` preserves every source row, including NPI `0` or other
+  invalid NPI values. `c4result.csv` includes only rows whose NPI is exactly 10 digits;
+  excluded rows are counted under `records_rejected` as `invalid_npi_not_10_digits`.
+- **Why:** NPIs must be 10-digit identifiers; invalid values are data-quality issues for
+  C3/C5 rather than silently corrected values.
+- **Evidence:** Real run excluded 5 rows with NPI `0`; curated rows fell from 21,858 to 21,853.
+- **Alternatives rejected:** Dropping invalid NPIs from raw data or replacing them with null.
+- **Confidence / risk:** High.

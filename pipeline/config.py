@@ -17,6 +17,7 @@ class Config:
     archive: Path
     index_members: tuple[str, ...]
     c2_evidence_members: tuple[str, ...]
+    rate_file: Path | None = None
 
     def stage_dir(self, stage: str) -> Path:
         return self.data_dir / "stage" / stage
@@ -35,10 +36,17 @@ def load_config(path: Path | None = None) -> Config:
     archive = Path(source.get("archive", ""))
     if not archive.is_absolute():
         archive = data_dir / archive
+    rate_file_raw = source.get("rate_file") or os.environ.get("PTD_RATE_FILE")
+    rate_file = None
+    if rate_file_raw:
+        rate_file = Path(rate_file_raw).expanduser()
+        if not rate_file.is_absolute():
+            rate_file = data_dir / rate_file
     return Config(
         root=root,
         data_dir=data_dir,
         archive=archive,
         index_members=tuple(source.get("index_members", [])),
         c2_evidence_members=tuple(source.get("c2_evidence_members", [])),
+        rate_file=rate_file,
     )
