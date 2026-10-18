@@ -33,10 +33,11 @@ Centene index files ─► C1 parse ─► C2 PPO network ─► C3 grade files 
    - [C5 · Address engine (heuristic scoring)](#c5--the-address-engine-heuristic-scoring)
    - [C6 · Final rate file](#c6--final-rate-file)
    - [C7 · Cost-effectiveness](#c7--cost-effectiveness-brownie-point)
-8. [Deliverables map](#8-deliverables-map)
-9. [Engineering principles](#9-engineering-principles)
-10. [Repository layout](#10-repository-layout)
-11. [Known limitations](#11-known-limitations)
+8. [AI models: NLP fallback and RAG copilot](#8-ai-models-nlp-fallback-and-rag-copilot)
+9. [Deliverables map](#9-deliverables-map)
+10. [Engineering principles](#10-engineering-principles)
+11. [Repository layout](#11-repository-layout)
+12. [Known limitations](#12-known-limitations)
 
 ---
 
@@ -51,6 +52,29 @@ Centene index files ─► C1 parse ─► C2 PPO network ─► C3 grade files 
 | **C5** Health Net directory | **3,734** NPIs searched, **0** errors; **78.2 %** found in Health Net's commercial PPO; **62.0 %** have their address confirmed by Health Net | `stage/c5_healthnet/_manifest.json` (2026-10-18) |
 | **C6** Address verification | Rows with ≥ 2 independent sources agreeing on the address: **4.8 % → 25.0 %** (strong sources) / **57.1 %** (incl. hidden payer listings) | offline analysis of the C6 file, 2026-10-18 |
 | **C7** Cost-effectiveness | 3,008 providers scored against Medicare-anchored, locality-adjusted peers; 336 honestly marked *Insufficient data* | in-memory run on the C6 file, 2026-10-18 |
+
+### Plots for insights
+
+**C2: how 3,274 Centene plans narrow to 453 CA commercial-group PPO plans (every bar is a rule ID)**
+![C2 plan classification](docs/assets/c2_classification.png)
+
+**C2: why rules decide. NLP embedding scores never reach 0.5 (max 0.418), so a 0.8 threshold would miss every PPO plan**
+![C2 NLP score distribution](docs/assets/c2_nlp_score_distribution.png)
+
+**C3: file-quality scorecard for the Health Net CA file (92.9, A); code coverage is the one weak dimension**
+![C3 quality metrics](docs/assets/c3_quality_metrics.png)
+
+**C4: from 1,717 services to 21,853 curated rates (log scale)**
+![C4 extraction funnel](docs/assets/c4_extraction_funnel.png)
+
+**C5: the heuristic address-scoring weights; no single non-CMS source reaches VERIFIED alone**
+![C5 scoring weights](docs/assets/c5_scoring_weights.png)
+
+**C6: what verifies each final row; payer and claims evidence lifts verification from 4.8 % to 25.0 % (strong) / 57.1 % (total)**
+![C6 verification by source](docs/assets/c6_verification_by_source.png)
+
+**C7: providers by price-vs-peers × breadth quadrant**
+![C7 quadrants](docs/assets/c7_quadrants.png)
 
 ---
 
@@ -68,6 +92,8 @@ Payers publish negotiated rates as TiC machine-readable files, but those rates a
 ---
 
 ## 3. Architecture
+
+![Pipeline architecture](docs/assets/pipeline_architecture.png)
 
 ```mermaid
 flowchart LR
@@ -113,7 +139,7 @@ make setup                                   # uv sync
 # Put the dataset archive at data/hilabs_dataset_2026-10-17.zip
 # (or: export PTD_DATA_DIR=/folder/containing/the/zip)
 
-PTD_NPD_API=1 make pipeline                  # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7
+make pipeline                                # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7 (every source on)
 make test                                    # ruff + pytest
 ```
 
@@ -124,7 +150,7 @@ make c1 && make c2          # index parsing, PPO network      → data/out/c2_pp
 make c3                     # file quality grades             → docs/deliverables/file_quality_metrics.md
 make c4                     # rate extraction                 → data/stage/c4/selected_rates.csv
 make c5hn                   # Health Net evidence, replayed offline from the archive (no API, no key)
-PTD_NPD_API=1 make c5       # address engine                  → data/stage/c5/c5result.csv
+make c5                     # address engine                  → data/stage/c5/c5result.csv
 make c6                     # final rate file                 → data/out/final_provider_rates.xlsx
 make c7                     # cost-effectiveness              → data/out/c7_cost_effectiveness.xlsx
 ```
@@ -132,12 +158,14 @@ make c7                     # cost-effectiveness              → data/out/c7_co
 | Environment variable | Effect |
 |---|---|
 | `PTD_DATA_DIR` | Folder that contains the dataset archive (default `data/`) |
-| `PTD_NPD_API=1` | Use the CMS National Provider Directory FHIR API in C5. Responses are cached (`PTD_NPD_MAX_NPIS`, `PTD_NPD_WORKERS`) |
+| `PTD_NPD_API` | CMS National Provider Directory lookups in C5. **On by default**, for every NPI (`PTD_NPD_MAX_NPIS=0`). Responses are cached per NPI. `PTD_NPD_API=0` disables it; `PTD_NPD_WORKERS` (default 4) sets concurrency |
+| `PTD_GEOCODE` | Census geocoding of candidate addresses in C5. **On by default**, cached. `PTD_GEOCODE=0` disables it; `PTD_GEOCODE_WORKERS` (default 8) sets concurrency |
 | `PTD_AS_OF` | Fixed reference date for freshness and expiry scoring, so reruns are reproducible |
 | `PTD_C3_WORKERS`, `PTD_C3_SAMPLE_EVERY` | C3 parallelism and explicit diagnostic sampling (C4 rejects sampled grades) |
+| `PTD_C3_ROW_FLAG_LIMIT`, `PTD_C3_MAX_OUTLIER_COHORTS` | Optional caps on C3 exception examples and outlier cohorts. **Default 0 = no cap** |
 | `PTD_REVALIDATION_ZIP`, `PTD_MEDICARE_PROVIDER_ZIP`, `PTD_PECOS_ENROLLMENT_ZIP` | Use a standalone file in place of the copy inside the archive |
 
-**Live Health Net refresh (optional).** `make c5hn` replays the responses archived in the dataset, so a clean clone reproduces the 2026-10-18 result offline. To refresh from the live directory, run `uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5`. It is rate-limited and caches every response.
+**Live Health Net refresh (optional).** `make c5hn` replays the responses archived in the dataset, so a clean clone reproduces the 2026-10-18 result offline. To refresh from the live directory, run `uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5`. There are no hard caps on `--workers` or `--rps`, and every result page is fetched. The defaults stay polite because a live API that is hammered starts refusing requests. Every response is cached.
 
 ---
 
@@ -286,7 +314,86 @@ The NPPES-only baseline verified **4.8 %** of rows.
 
 ---
 
-## 8. Deliverables map
+## 8. AI models: NLP fallback and RAG copilot
+
+The core pipeline (C1–C7) is **deterministic and rule-based**: every decision is traceable to a rule ID. Models are used in two places only, and neither can change an extracted rate.
+
+| Component | Model | Runs | Role | Changes pipeline outputs? |
+|---|---|---|---|---|
+| **C2 semantic fallback** (`R-C2-08-NLP_FALLBACK`) | `all-MiniLM-L6-v2` (sentence-transformers, 384-dim embeddings) | Locally, CPU | For a CA commercial-group plan whose name has **no** PPO/HMO/EPO/POS token, cosine similarity to a PPO archetype ("open network preferred provider organization with out-of-network benefits"). Score ≥ 0.80 → PPO (high ≥ 0.90, medium ≥ 0.85, else low confidence). Every plan also gets an `nlp_score` column for review | **Only if `sentence-transformers` is installed.** Explicit tokens always win: restrictive tokens are checked first and the fallback only runs after every rule has failed. The results in this README were produced **without** it (453 PPO plans, all by explicit tokens) |
+| **RAG copilot — retrieval** | `all-MiniLM-L6-v2` | Locally | Embeds and searches the project's own knowledge: `docs/DECISIONS.md`, `docs/ps/DATA_FINDINGS.md`, the problem statement, and every stage's manifest and summary. Index cached at `data/rag/rag_index.parquet` | No (read-only) |
+| **RAG copilot — record lookup** | DuckDB (no model) | Locally | Exact, parameterised lookups over pipeline outputs by NPI, TIN, billing code or specialty, so answers about specific providers come from the data, not the model | No (read-only) |
+| **RAG copilot — generation** | `qwen2.5:1.5b` via [Ollama](https://ollama.com) (override: `LOCAL_LLM_MODEL`, `LOCAL_LLM_URL`) | Locally on `127.0.0.1:11434` | Answers questions grounded in the retrieved chunks and records ("why was this address chosen?", "what does R-C5-12 do?") | No (read-only) |
+
+**Why rules, not models, decide the PPO network.** We tested learned classifiers against the deterministic rules (explicit-token regex plus scope rules) for C2:
+
+| Approach | Outcome | Decision |
+|---|---|---|
+| Sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`), cosine similarity to a PPO archetype | Scores compress at the bottom: about 1,300 plans in 0.0–0.1, about 1,550 in 0.1–0.2, about 330 in 0.2–0.3, about 75 in 0.3–0.4; **maximum 0.418; 0 plans ≥ 0.5**. A 0.8 threshold would catch **0 %** of PPO plans (`nlp_score` distribution over all plans, shown on the dashboard overview) | Rejected as a classifier. Kept only as a reviewer column (`nlp_score`); its ≥ 0.80 fallback cannot fire on this data |
+| Logistic-regression classifier on plan names | Confidence **below 0.5** (team evaluation) | Rejected |
+| TF-IDF + grouping plans by shared rate-file URL (`5a277c1`) | **Mislabelled HMO plans as PPO**, because HMO and PPO plans share Health Net's single CA rate file | Reverted (`ab96954`) |
+| **Regex tokens + deterministic scope rules** (`R-C2-01`…`07`) | Every decision explained by a rule ID; restrictive tokens (HMO/EPO/POS) checked first; ambiguous plans left `UNRESOLVED` instead of guessed | **Used** |
+
+The reason is structural, not just a score. Plan names are short, coded strings (real examples: `CA L PPO 30/500/4000/30%`, `CA L SAL HMO 20/20%/2500`, `CA L EOA 20/0/1500`, `CA L&T CUS SAL CEMENT MASONS CA H&W GF+`), and the strongest signal is an explicit network token. A model can only blur that token with surrounding words. Rules are also what the PS asks for ("explain your logic and how you ruled out HMO, EPO and POS").
+
+**Why these choices:**
+- **Everything runs locally.** No pipeline data or provider records leave the machine, and there are no API keys or per-query costs.
+- **Small models.** A ~1.5B-parameter LLM and a 22M-parameter embedder run on a laptop CPU.
+- **Grounded answers.** The copilot's system prompt tells it to answer from the retrieved project documents, the exact DuckDB record lookups and benchmark figures, and to cite rule IDs. So it explains the pipeline from the pipeline's own evidence rather than from general knowledge.
+
+### 8.1 Pipeline Copilot (RAG chatbot on Qwen 2.5)
+
+A local question-answering assistant over the pipeline's own evidence. Ask it "why was NPI 1780886424 matched to Harvard Blvd?", "what is the rate for 99214?" or "how was C3 scored?", and it answers from the project's rules and outputs.
+
+**How one question is answered** (`pipeline/rag/engine.py · ask_rag`):
+
+```text
+question ─┬─► 1. Record lookup (DuckDB) ── an NPI (1XXXXXXXXX), TIN (XX-XXXXXXX) or billing code in the question
+          │                                 → parameterised SQL over the C5/C6/C7 outputs (rows, rates, specialty, C7 tier)
+          ├─► 2. Semantic retrieval ────── all-MiniLM-L6-v2 embeds the question → cosine similarity against the
+          │                                 indexed chunks → top-k = 4 chunks (source, section, score)
+          └─► 3. Grounded prompt ────────── system prompt = benchmark figures + live records + the 4 chunks
+                                            → Qwen 2.5 via Ollama → answer + cited sources + latency/tokens
+```
+
+If Ollama is offline, the copilot does not fail. It returns the live records plus the retrieved chunks as a structured summary (`fallback_answer_from_chunks`).
+
+**Specifics (from the code):**
+
+| Setting | Value | Where |
+|---|---|---|
+| Generation model | **`qwen2.5:1.5b`** (Qwen 2.5, 1.5B parameters, instruct). If that exact tag is missing, the first installed `qwen*` model is used | `engine.py · DEFAULT_MODEL`, `resolve_model_name` |
+| Serving | Ollama `/api/generate`, non-streaming, `temperature = 0.2`, 30 s timeout | `engine.py · query_ollama` |
+| Embedding model | **`all-MiniLM-L6-v2`** (sentence-transformers, 384-dim, unit-normalised vectors) | `indexer.py · EMBEDDING_MODEL_NAME` |
+| Retrieval | Cosine similarity (dot product of normalised vectors), **top-k = 4** (`top_k` per request) | `indexer.py · retrieve` |
+| Knowledge indexed | `docs/DECISIONS.md` (by rule), `docs/ps/DATA_FINDINGS.md`, `docs/ps/PROBLEM_STATEMENT.md` (by section), `docs/deliverables/file_quality_metrics.md`, every stage `_manifest.json` / `*summary.json`, and the output workbooks | `indexer.py · extract_chunks`, `get_watched_files` |
+| Index cache | `data/rag/rag_index.parquet` + `rag_meta.json`. It is rebuilt automatically when any watched file's modification time changes | `indexer.py · build_or_load_index`, `is_index_stale` |
+| Record lookups | NPI `\b1\d{9}\b`, TIN `\b\d{2}-\d{7}\b`, billing code (3–5 chars plus a code/price word), plus specialty, plan, file-quality and C7 queries, all parameterised DuckDB SQL | `data_records.py · detect_and_query_data` |
+| Service | `python -m pipeline.rag.server` on **`127.0.0.1:8005`**: `GET /health`, `POST /query` (`{"query", "top_k", "model"}`), `POST /sync` (rebuild index) | `server.py` |
+| Dashboard link | `web/app/api/copilot` → `RAG_DAEMON_URL` (default `http://127.0.0.1:8005`) and `LOCAL_LLM_URL` (default `http://127.0.0.1:11434`) | `web/app/api/copilot/route.ts` |
+
+**Model weights:**
+
+| Model | Role | Size | Get the weights |
+|---|---|---|---|
+| Qwen 2.5 1.5B Instruct (`qwen2.5:1.5b`) | Answer generation | 1.5B parameters (Ollama ships a quantised build of about 1 GB) | `ollama pull qwen2.5:1.5b` · [Ollama library](https://ollama.com/library/qwen2.5) · [Hugging Face](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) · **Team mirror: _link to be added_** |
+| all-MiniLM-L6-v2 | Retrieval embeddings, plus the C2 `nlp_score` | 22M parameters, 384-dim (about 90 MB) | Downloaded automatically by sentence-transformers on first use · [Hugging Face](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) · **Team mirror: _link to be added_** |
+
+**Running the copilot and dashboard (optional):**
+
+```bash
+uv pip install sentence-transformers          # optional dependency (not needed for make pipeline)
+ollama pull qwen2.5:1.5b                      # local LLM
+uv run python -m pipeline rag                 # build/refresh the retrieval index from the latest outputs
+uv run python -m pipeline.rag.server          # RAG service on http://127.0.0.1:8005
+cd web && npm install && npm run dev          # Next.js dashboard (overview, rates, address, quality, audit, copilot)
+```
+
+> The dashboard (`web/`) reads pipeline outputs from `data/` and talks to the RAG service through `RAG_DAEMON_URL` (default `http://127.0.0.1:8005`). It is the PS's brownie point 7(a), a structured UI for executive and analyst views.
+
+---
+
+## 9. Deliverables map
 
 | # | PS deliverable | Where |
 |---|---|---|
@@ -296,22 +403,22 @@ The NPPES-only baseline verified **4.8 %** of rows.
 | 4 | Summary metrics | §1 above · `data/stage/*/_manifest.json` |
 | 5 | Video | — |
 | 6 | Re-runnable code repo | This repo: `make pipeline`, no hardcoded paths |
-| 7 | Brownie points | C7 → `data/out/c7_cost_effectiveness.xlsx` · UI scaffold in `api/` + `web/` |
+| 7 | Brownie points | (a) Next.js dashboard + local RAG copilot (`web/`, `pipeline/rag/`, §8) · (b) C7 → `data/out/c7_cost_effectiveness.xlsx` |
 
 ---
 
-## 9. Engineering principles
+## 10. Engineering principles
 
 - **Stream, never load.** `ijson` over zip members; bounded reservoirs and SQLite for duplicate detection; memory stays flat as files grow.
 - **Raw is immutable.** Source fields are kept next to normalized ones, and nothing is overwritten.
 - **Every rule has an ID and evidence.** Recorded in `docs/DECISIONS.md` with the rule, the reason, the evidence query or result, the alternatives rejected and the risk.
 - **Honest outputs.** Unknown is `None`, not 0 or 100. Absence of evidence is never scored as good, and every fallback is counted in the output.
 - **Reproducible.** One archive, config-driven paths, manifests with config hash and git SHA, `PTD_AS_OF` for date-dependent metrics, and an offline replay of the live directory evidence.
-- **Polite external calls.** Rate-limited (≤ 5 req/s globally), retried with backoff, cached, and resumable. The Health Net web key is read at runtime and never written to disk.
+- **Polite external calls, no hard caps.** Every source is on by default with no NPI or page limits. Live APIs default to a polite global rate (overridable), are retried with backoff, and are cached and resumable. The Health Net web key is read at runtime and never written to disk.
 
 ---
 
-## 10. Repository layout
+## 11. Repository layout
 
 ```text
 pipeline/
@@ -332,16 +439,19 @@ tests/                     pytest suite (one file per stage)
 docs/ps/                   problem statement (verbatim) + verified data findings
 docs/DECISIONS.md          rule log: R-C1 … R-C7
 docs/DATA_SOURCES.md       archive contents, sources, as-of dates
-api/ · web/                UI scaffold (FastAPI + Next.js)
+pipeline/rag/              RAG copilot: indexer, DuckDB record lookups, engine, local server
+web/                       Next.js dashboard (overview, rates, address, quality, audit, copilot)
+api/                       FastAPI scaffold
 config.yaml · Makefile     configuration and stage orchestration
 ```
 
 ---
 
-## 11. Known limitations
+## 12. Known limitations
 
 - **Hidden listings.** The meaning of Health Net's hidden-listing reasons ("Claims History", "Provider Request", …) is our reading of its labels; Health Net does not publish definitions. That is why hidden listings are a separate, weaker tier.
 - **Same building, not same suite.** A building-level match proves the building, not the exact suite.
 - **Medicare-only coverage.** Medicare claims (2024) and PECOS cover only providers who bill Medicare. Commercial-only providers rely on NPPES, DAC and Health Net.
 - **Live data drifts.** The live directory changes over time. The archived 2026-10-18 responses keep results reproducible; a live refresh gives a newer snapshot.
+- **The NLP fallback depends on the environment.** C2's fallback runs only when `sentence-transformers` is installed, so install it (or not) consistently across runs. Reported results use the rule-only path.
 - **QualChoice is missing.** Its in-network file is unavailable from Centene (404). It is out of scope for California.
