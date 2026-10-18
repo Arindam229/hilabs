@@ -170,6 +170,19 @@ addresses to C4 providers, enriches specialties, and writes `c5result.csv`,
 `c5_address_audit.csv`, and `c5_summary.json`. C6 selects one canonical address
 per `(NPI, TIN, Billing Code)` and writes `data/out/final_provider_rates.xlsx`.
 
+CMS Revalidation Reassignment List adds exact `Individual NPI -> Group PAC ID`
+evidence. Put `Revalidation Reassignment List.zip` in `data/`, or point to it
+without copying:
+
+```bash
+PTD_REVALIDATION_ZIP="$HOME/Downloads/Revalidation Reassignment List.zip" make c5
+```
+
+C5 streams its CP1252 CSV directly from ZIP. It joins reassignment to CMS DAC on
+exact `(NPI, Group PAC ID)`, then compares CMS group/facility name with PTD TIN
+business name. This supports a TIN/address link but never labels it directly
+verified: CMS reassignment data does not publish numeric TIN or street address.
+
 Use current CMS National Provider Directory locations for a bounded, resumable
 address-evidence pass. Responses are cached under `data/stage/c5/cms_npd_cache/`:
 

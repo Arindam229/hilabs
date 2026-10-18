@@ -199,3 +199,10 @@ Template:
 - **Evidence:** `tests/test_c3_resource_optimizations.py` verifies deterministic block selection and compact exception flags; `tests/test_c2_c3_c4_connection.py` verifies C4 rejects sampled grades.
 - **Alternatives rejected:** Always sampling C3, which weakens C3's required file-level quality claim; loading complete MRFs into memory for exact metrics.
 - **Confidence / risk:** High for memory safety. Cohort-outlier rate is reservoir-sampled and must remain labelled as an estimate; row-flag Parquet is an auditable capped sample when exceptions exceed its limit.
+
+### R-C5-04 — Bridge CMS reassignment to DAC by exact NPI and Group PAC ID
+- **Rule:** Stream `revalidation_group_reassignment_pa_xref.csv` directly from its ZIP using CP1252. Keep only C4 NPIs. Join each record to CMS Doctors and Clinicians on exact `(Individual NPI, Group PAC ID = org_pac_id)`. Add 15 address-evidence points for an exact bridge and 10 more when normalized PTD TIN business name exactly matches CMS group/facility name. Label the TIN/address link `SUPPORTED` or `STRONGLY_SUPPORTED`; never `DIRECTLY_VERIFIED`.
+- **Why:** Reassignment proves that a clinician bills through a Medicare group, while DAC locates that same clinician/group pair. Exact organization-name agreement further supports the PTD TIN entity. Dataset still omits numeric TIN-to-address mapping.
+- **Evidence:** Real 2026-10 file streamed 3,634,486 rows; matched 314 rows, 207 C4 NPIs and 250 Group PAC IDs. C5 summary reports 6 strongly supported `(NPI,TIN)` keys. Candidate output contains 130 exact-PAC and 7 exact-PAC-plus-name address candidates after address normalization.
+- **Alternatives rejected:** NPI-only reassignment join, fuzzy organization-name matching, and treating Group PAC ID as TIN. Each can falsely attach an address to wrong billing organization.
+- **Confidence / risk:** High for exact reassignment/DAC pair; medium for TIN association because business-name record linkage is not numeric TIN proof. Coverage is Medicare-limited.

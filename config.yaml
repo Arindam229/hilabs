@@ -1,6 +1,7 @@
 data_dir: data
 sources:
   archive: hilabs_dataset_2026-10-17.zip
+  revalidation_zip: Revalidation Reassignment List.zip
   index_members:
     - centene/index/*.json
   c2_evidence_members: []

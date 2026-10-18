@@ -37,6 +37,7 @@ C5_COLUMNS = [
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
     "Geocode_Status", "Latitude", "Longitude", "Nearest_TIN_Site_Distance_Km", "Geo_Score", "Geo_Anomaly_Flag",
     "TIN_Modal_ZIP3", "TIN_Support_Score",
+    "Reassignment_Status", "Group_PAC_ID", "Reassignment_Group_Name", "Reassignment_Name_Match",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code",
     "Specialty_Source", "Specialty_Status", "Negotiated_Type", "Billing_Class",
     "Setting", "Service_Code", "Modifiers", "Source_File", "Selection_Rule",
@@ -50,6 +51,7 @@ CANDIDATE_COLUMNS = [
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code", "CMS_Specialty",
     "Alternative_Addresses", "Geocode_Status", "Latitude", "Longitude",
     "Nearest_TIN_Site_Distance_Km", "Geo_Score", "Geo_Anomaly_Flag", "TIN_Modal_ZIP3", "TIN_Support_Score",
+    "Reassignment_Status", "Group_PAC_ID", "Reassignment_Group_Name", "Reassignment_Name_Match",
 ]
 
 AUDIT_COLUMNS = [
@@ -57,6 +59,7 @@ AUDIT_COLUMNS = [
     "Normalized_Address", "Source", "Source_Record_Id", "Source_Updated_At",
     "Match_Method", "Address_Status", "Included_In_C5", "Reason",
     "TIN_Address_Link_Status", "Taxonomy_Code", "NUCC_Specialty",
+    "Reassignment_Status", "Group_PAC_ID", "Reassignment_Group_Name", "Reassignment_Name_Match",
     "CMS_Specialty", "Specialty_Source", "Specialty_Status", "NUCC_vs_HiLabs_Discrepancy",
     "Conflicting_Address", "Alternative_Addresses",
 ]
@@ -257,6 +260,8 @@ def _resolve_address_candidates(
                 "orig": rec["orig"], "sources": set(), "families": set(),
                 "taxonomy": rec.get("taxonomy", ""),
                 "cms_specialty": rec.get("cms_specialty", ""), "updated": rec.get("updated", ""),
+                "reassignment_status": "NONE", "reassignment_name_match": False,
+                "reassignment_group_pac_id": "", "reassignment_group_name": "",
             }
             matched_key = norm
         elif not addr_groups[matched_key]["orig"]:
@@ -267,6 +272,14 @@ def _resolve_address_candidates(
             addr_groups[matched_key]["taxonomy"] = rec["taxonomy"]
         if rec.get("cms_specialty") and not addr_groups[matched_key]["cms_specialty"]:
             addr_groups[matched_key]["cms_specialty"] = rec["cms_specialty"]
+        evidence_rank = {"NONE": 0, "EXACT_NPI_GROUP_PAC": 1, "EXACT_NPI_GROUP_PAC_NAME": 2}
+        incoming_evidence = rec.get("reassignment_status") or "NONE"
+        current_evidence = addr_groups[matched_key].get("reassignment_status") or "NONE"
+        if evidence_rank.get(incoming_evidence, 0) > evidence_rank.get(current_evidence, 0):
+            addr_groups[matched_key]["reassignment_status"] = rec["reassignment_status"]
+            addr_groups[matched_key]["reassignment_name_match"] = bool(rec.get("reassignment_name_match"))
+            addr_groups[matched_key]["reassignment_group_pac_id"] = rec.get("reassignment_group_pac_id", "")
+            addr_groups[matched_key]["reassignment_group_name"] = rec.get("reassignment_group_name", "")
 
     if not _valid_npi(npi):
         return addr_groups, "INVALID_NPI"
@@ -301,6 +314,12 @@ def score_address_candidate(candidate: dict[str, Any], geo_score: int = 0) -> tu
         score += 30
     if "NPPES" in sources:
         score += 10
+    if candidate.get("reassignment_status") in {
+        "EXACT_NPI_GROUP_PAC", "EXACT_NPI_GROUP_PAC_NAME",
+    }:
+        score += 15
+    if candidate.get("reassignment_name_match"):
+        score += 10
     if len(families) >= 2:
         score += 20
     if _address_role(_text(candidate.get("orig"))) == "mailing/po_box":
@@ -309,6 +328,18 @@ def score_address_candidate(candidate: dict[str, Any], geo_score: int = 0) -> tu
     score = max(0, min(base_score + geo_score, 100))
     verification = "VERIFIED" if base_score >= 60 else "PROBABLE" if base_score >= 30 else "LOW"
     return score, verification
+
+
+def _reassignment_support(candidate: dict[str, Any]) -> tuple[int, str, str, str, str]:
+    """Translate exact reassignment evidence into bounded TIN-address support."""
+    evidence = _text(candidate.get("reassignment_status")) or "NONE"
+    pac_id = _text(candidate.get("reassignment_group_pac_id"))
+    group_name = _text(candidate.get("reassignment_group_name"))
+    if evidence == "EXACT_NPI_GROUP_PAC_NAME":
+        return 25, "STRONGLY_SUPPORTED", pac_id, group_name, evidence
+    if evidence == "EXACT_NPI_GROUP_PAC":
+        return 15, "SUPPORTED", pac_id, group_name, evidence
+    return 0, "UNVERIFIED", "", "", "NONE"
 
 
 def _zip3(address: str) -> str:
@@ -398,10 +429,17 @@ def _apply_geospatial_support(
             tin_support, tin_status, modal_zip3, address_count = _tin_geographic_support(
                 profiles.get(tin, {}), npi, norm
             )
+            reassign_score, reassign_status, pac_id, group_name, evidence = _reassignment_support(group)
+            if reassign_score > tin_support:
+                tin_support = reassign_score
+                tin_status = reassign_status
             group["tin_support_score"] = tin_support
             group["tin_link_status"] = tin_status
             group["tin_modal_zip3"] = modal_zip3
             group["tin_address_npi_count"] = address_count
+            group["reassignment_status"] = evidence
+            group["reassignment_group_pac_id"] = pac_id
+            group["reassignment_group_name"] = group_name
             candidates.append((npi, tin, norm, group))
             base_score, _ = score_address_candidate(group)
             if base_score >= 60 and geo["latitude"] is not None:
@@ -613,10 +651,109 @@ def _build_cms(outer_zip_path: Path, npi_set: set[str], primary_tax: dict[str, s
                                          row.get("City/Town"), row.get("State"), row.get("ZIP Code"))
                 spec = _text(row.get("pri_spec"))
                 rec = {"source": "CMS_DAC", "orig": addr, "norm": norm, "taxonomy": (primary_tax or {}).get(npi, ""),
-                       "updated": "CMS_DAC", "cms_specialty": spec}
-                if norm and not any(r["norm"] == norm and r["source"] == "CMS_DAC" for r in result[npi]):
+                       "updated": "CMS_DAC", "cms_specialty": spec,
+                       "org_pac_id": _text(row.get("org_pac_id")),
+                       "facility_name": _text(row.get("Facility Name"))}
+                if norm and not any(
+                    r["norm"] == norm
+                    and r["source"] == "CMS_DAC"
+                    and r.get("org_pac_id") == rec["org_pac_id"]
+                    for r in result[npi]
+                ):
                     result[npi].append(rec)
     return result
+
+
+def _load_revalidation(
+    archive_path: Path | None,
+    npi_set: set[str],
+) -> tuple[dict[str, list[dict[str, str]]], dict[str, int | bool]]:
+    """Stream CMS reassignment rows for C4 NPIs directly from release ZIP."""
+    result: dict[str, list[dict[str, str]]] = {}
+    stats: dict[str, int | bool] = {
+        "available": False,
+        "rows_scanned": 0,
+        "matched_rows": 0,
+        "matched_npis": 0,
+        "matched_group_pac_ids": 0,
+    }
+    if archive_path is None or not archive_path.is_file():
+        return result, stats
+    with zipfile.ZipFile(archive_path) as archive:
+        members = [
+            name for name in archive.namelist()
+            if name.endswith("revalidation_group_reassignment_pa_xref.csv")
+        ]
+        if not members:
+            return result, stats
+        stats["available"] = True
+        with archive.open(members[0]) as stream:
+            reader = csv.DictReader(io.TextIOWrapper(stream, encoding="cp1252", newline=""))
+            for row in reader:
+                stats["rows_scanned"] = int(stats["rows_scanned"]) + 1
+                npi = _text(row.get("Individual NPI"))
+                if npi not in npi_set:
+                    continue
+                result.setdefault(npi, []).append({
+                    "group_pac_id": _text(row.get("Group PAC ID")),
+                    "group_enrollment_id": _text(row.get("Group Enrollment ID")),
+                    "group_name": _text(row.get("Group Legal Business Name")),
+                    "group_state": _text(row.get("Group State Code")),
+                    "record_type": _text(row.get("Record Type")),
+                })
+                stats["matched_rows"] = int(stats["matched_rows"]) + 1
+    stats["matched_npis"] = len(result)
+    stats["matched_group_pac_ids"] = len({
+        record["group_pac_id"]
+        for records in result.values()
+        for record in records
+        if record["group_pac_id"]
+    })
+    return result, stats
+
+
+def _enrich_cms_with_reassignment(
+    npi: str,
+    tin_business_name: str,
+    cms_records: list[dict[str, Any]],
+    reassignment_records: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Attach exact NPI/group-PAC evidence to corresponding CMS DAC addresses."""
+    del npi  # records were already filtered by exact Individual NPI
+    by_group = {
+        record["group_pac_id"]: record
+        for record in reassignment_records
+        if record.get("group_pac_id")
+    }
+    enriched = []
+    tin_name = _compact(tin_business_name)
+    for source in cms_records:
+        record = dict(source)
+        record.update({
+            "reassignment_status": "NONE",
+            "reassignment_name_match": False,
+            "reassignment_group_pac_id": "",
+            "reassignment_group_name": "",
+        })
+        reassignment = by_group.get(_text(record.get("org_pac_id")))
+        if reassignment:
+            names = {
+                _compact(reassignment.get("group_name", "")),
+                _compact(record.get("facility_name", "")),
+            } - {""}
+            name_match = bool(tin_name and tin_name in names)
+            record.update({
+                "reassignment_status": (
+                    "EXACT_NPI_GROUP_PAC_NAME" if name_match else "EXACT_NPI_GROUP_PAC"
+                ),
+                "reassignment_name_match": name_match,
+                "reassignment_group_pac_id": reassignment["group_pac_id"],
+                "reassignment_group_name": (
+                    reassignment.get("group_name") or record.get("facility_name", "")
+                ),
+            })
+        enriched.append(record)
+    return enriched
 
 
 def _npd_location_records(bundle: dict[str, Any]) -> list[dict[str, str]]:
@@ -755,6 +892,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     # outer zip path
     nppes_map, primary_tax = _build_nppes(outer_zip, npi_set)
     cms_map = _build_cms(outer_zip, npi_set, primary_tax)
+    revalidation_map, revalidation_stats = _load_revalidation(cfg.revalidation_zip, npi_set)
     npd_map: dict[str, list[dict[str, str]]] = {npi: [] for npi in npi_set}
     npd_stats: dict[str, Any] = {"enabled": False}
     if os.environ.get("PTD_NPD_API") == "1":
@@ -807,7 +945,11 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     pair_candidates: dict[tuple[str, str], tuple[dict[str, dict[str, Any]], str]] = {}
     for (npi, tin), business_name in candidate_keys.items():
         nppes_addrs = nppes_map.get(npi, []) if _valid_npi(npi) else []
-        cms_addrs = (cms_map.get(npi, []) + npd_map.get(npi, [])) if _valid_npi(npi) else []
+        cms_addrs = (
+            _enrich_cms_with_reassignment(
+                npi, business_name, cms_map.get(npi, []), revalidation_map.get(npi, [])
+            ) + npd_map.get(npi, [])
+        ) if _valid_npi(npi) else []
         addr_groups, status = _resolve_address_candidates(npi, nppes_addrs, cms_addrs)
         pair_candidates[(npi, tin)] = (addr_groups, status)
         if status == "CORROBORATED":
@@ -821,7 +963,11 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
 
     geocode_stats = _apply_geospatial_support(pair_candidates, out_dir / "census_geocode_cache.json")
     supported_tin = sum(
-        any(group.get("tin_link_status") == "SUPPORTED" for group in groups.values())
+        any(group.get("tin_link_status") in {"SUPPORTED", "STRONGLY_SUPPORTED"} for group in groups.values())
+        for groups, _ in pair_candidates.values()
+    )
+    strongly_supported_tin = sum(
+        any(group.get("tin_link_status") == "STRONGLY_SUPPORTED" for group in groups.values())
         for groups, _ in pair_candidates.values()
     )
     unverified_tin = len(candidate_keys) - supported_tin
@@ -854,6 +1000,10 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Geo_Score": group.get("geo_score", 0), "Geo_Anomaly_Flag": group.get("geo_flag", "not_measured"),
                 "TIN_Modal_ZIP3": group.get("tin_modal_zip3", ""),
                 "TIN_Support_Score": group.get("tin_support_score", 0),
+                "Reassignment_Status": group.get("reassignment_status", "NONE"),
+                "Group_PAC_ID": group.get("reassignment_group_pac_id", ""),
+                "Reassignment_Group_Name": group.get("reassignment_group_name", ""),
+                "Reassignment_Name_Match": "yes" if group.get("reassignment_name_match") else "no",
             })
 
     for idx, c4r in enumerate(c4_rows):
@@ -906,6 +1056,10 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 tin_support_score = 0
                 tin_modal_zip3 = ""
                 tin_link = "UNVERIFIED"
+                reassignment_status = "NONE"
+                group_pac_id = ""
+                reassignment_group_name = ""
+                reassignment_name_match = "no"
             else:
                 g = addr_groups[norm]
                 orig_addr = g["orig"]
@@ -930,6 +1084,10 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 tin_support_score = int(g.get("tin_support_score", 0))
                 tin_modal_zip3 = g.get("tin_modal_zip3", "")
                 tin_link = g.get("tin_link_status", "UNVERIFIED")
+                reassignment_status = g.get("reassignment_status", "NONE")
+                group_pac_id = g.get("reassignment_group_pac_id", "")
+                reassignment_group_name = g.get("reassignment_group_name", "")
+                reassignment_name_match = "yes" if g.get("reassignment_name_match") else "no"
                 score, verification = score_address_candidate(g, int(g.get("support_score", geo_score)))
 
             # specialty
@@ -1011,6 +1169,10 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "TIN_Address_Link_Status": tin_link,
                 "TIN_Modal_ZIP3": tin_modal_zip3,
                 "TIN_Support_Score": tin_support_score,
+                "Reassignment_Status": reassignment_status,
+                "Group_PAC_ID": group_pac_id,
+                "Reassignment_Group_Name": reassignment_group_name,
+                "Reassignment_Name_Match": reassignment_name_match,
                 "Taxonomy_Code": tax_code,
                 "Specialty_Source": spec_source,
                 "Specialty_Status": spec_status,
@@ -1042,6 +1204,10 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Included_In_C5": "yes",
                 "Reason": status,
                 "TIN_Address_Link_Status": tin_link,
+                "Reassignment_Status": reassignment_status,
+                "Group_PAC_ID": group_pac_id,
+                "Reassignment_Group_Name": reassignment_group_name,
+                "Reassignment_Name_Match": reassignment_name_match,
                 "Taxonomy_Code": tax_code,
                 "NUCC_Specialty": nucc_spec,
                 "CMS_Specialty": cms_spec,
@@ -1085,16 +1251,21 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         "invalid_npi_count": invalid_npi_count,
         "unverified_tin_address_links": unverified_tin,
         "supported_tin_address_links": supported_tin,
+        "strongly_supported_tin_address_links": strongly_supported_tin,
         "duplicate_four_key_rows": four_key_dup,
         "specialty_mapped": specialty_mapped,
         "specialty_unmapped": specialty_unmapped,
         "nppes_zip": "NPPES_Data_Dissemination_October_2026_V2.zip",
         "cms_file": "DAC_NationalDownloadableFile.csv",
+        "cms_revalidation_file": (
+            cfg.revalidation_zip.name if cfg.revalidation_zip and cfg.revalidation_zip.is_file() else "not_available"
+        ),
+        "cms_revalidation": revalidation_stats,
         "nucc_file": "nucc_taxonomy_261.csv",
         "nucc_mapped_codes": len(nucc),
         "api_status": npd_stats,
         "geocoding": geocode_stats,
-        "sources": ["NPPES", "NPPES_PL", "CMS_DAC", "CMS_NPD_LOCATION"],
+        "sources": ["NPPES", "NPPES_PL", "CMS_DAC", "CMS_REVALIDATION", "CMS_NPD_LOCATION"],
     }
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
@@ -1102,7 +1273,11 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         manifest_path,
         stage="c5",
         config_path=cfg.root / "config.yaml",
-        sources=[{"path": str(c4_path)}, {"path": str(outer_zip)}],
+        sources=[
+            {"path": str(c4_path)},
+            {"path": str(outer_zip)},
+            {"path": str(cfg.revalidation_zip) if cfg.revalidation_zip else "not_configured"},
+        ],
         counts={
             "input_c4_rows": len(c4_rows),
             "candidate_keys_npi_tin": len(candidate_keys),
@@ -1111,6 +1286,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
             "address_matched_rows": addr_matched,
             "unresolved": unresolved,
             "invalid_npi_count": invalid_npi_count,
+            "revalidation_matched_npis": revalidation_stats["matched_npis"],
+            "strongly_supported_tin_address_links": strongly_supported_tin,
         },
         started_at=started_at,
     )

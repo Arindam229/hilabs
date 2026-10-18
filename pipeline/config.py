@@ -18,6 +18,7 @@ class Config:
     index_members: tuple[str, ...]
     c2_evidence_members: tuple[str, ...]
     rate_file: Path | None = None
+    revalidation_zip: Path | None = None
 
     def stage_dir(self, stage: str) -> Path:
         return self.data_dir / "stage" / stage
@@ -42,6 +43,12 @@ def load_config(path: Path | None = None) -> Config:
         rate_file = Path(rate_file_raw).expanduser()
         if not rate_file.is_absolute():
             rate_file = data_dir / rate_file
+    revalidation_raw = os.environ.get("PTD_REVALIDATION_ZIP") or source.get("revalidation_zip")
+    revalidation_zip = None
+    if revalidation_raw:
+        revalidation_zip = Path(revalidation_raw).expanduser()
+        if not revalidation_zip.is_absolute():
+            revalidation_zip = data_dir / revalidation_zip
     return Config(
         root=root,
         data_dir=data_dir,
@@ -49,4 +56,5 @@ def load_config(path: Path | None = None) -> Config:
         index_members=tuple(source.get("index_members", [])),
         c2_evidence_members=tuple(source.get("c2_evidence_members", [])),
         rate_file=rate_file,
+        revalidation_zip=revalidation_zip,
     )

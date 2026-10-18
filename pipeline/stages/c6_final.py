@@ -180,7 +180,8 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
                "Address_Selection_Status", "Address_Selection_Reason", "Specialty_Status",
                "Geocode_Status", "Latitude", "Longitude", "Nearest_TIN_Site_Distance_Km",
                "Geo_Score", "Geo_Anomaly_Flag", "TIN_Modal_ZIP3", "TIN_Support_Score",
-               "TIN_Address_Link_Status"]
+               "TIN_Address_Link_Status", "Reassignment_Status", "Group_PAC_ID",
+               "Reassignment_Group_Name", "Reassignment_Name_Match"]
     ws.append(headers)
     for r in selected_rows:
         rate = r.get("Rate", "")
@@ -202,6 +203,8 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
             r.get("Nearest_TIN_Site_Distance_Km", ""), r.get("Geo_Score", ""),
             r.get("Geo_Anomaly_Flag", ""), r.get("TIN_Modal_ZIP3", ""),
             r.get("TIN_Support_Score", ""), r.get("TIN_Address_Link_Status", ""),
+            r.get("Reassignment_Status", ""), r.get("Group_PAC_ID", ""),
+            r.get("Reassignment_Group_Name", ""), r.get("Reassignment_Name_Match", ""),
         ])
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{ws.max_row}"
