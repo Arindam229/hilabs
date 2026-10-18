@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import {
   Activity,
   Users,
@@ -137,6 +138,16 @@ export default function OverviewPage() {
             </div>
             <div className="mt-1 text-sm text-muted-foreground">
               NLP score range: {c2.nlp_score_min?.toFixed(3)} – {c2.nlp_score_max?.toFixed(3)} (mean {c2.nlp_score_mean?.toFixed(3)})
+            </div>
+            <div className="h-40 mt-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={Object.entries(c2.confidence_counts || {}).map(([k,v]) => ({name:k, value:v}))}>
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#3B82F6" />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </CardContent>
         </Card>
