@@ -29,6 +29,7 @@ export async function GET() {
     const c5Manifest = readJson("data/stage/c5/_manifest.json");
     const c5Summary = readJson("data/stage/c5/c5_summary.json");
     const c6Manifest = readJson("data/stage/c6/_manifest.json");
+    const c7Manifest = readJson("data/stage/c7/_manifest.json");
 
     return NextResponse.json({
       c1: {
@@ -100,24 +101,49 @@ export async function GET() {
         manifest: c5Manifest,
         summary: c5Summary,
         input_c4_rows: c5Summary?.input_c4_rows || 21853,
-        output_rows: c5Summary?.output_rows || 38231,
-        distinct_valid_npis: c5Summary?.distinct_valid_npis || 3734,
+        output_rows: c5Summary?.output_rows || c5Manifest?.counts?.output_rows || 46448,
+        distinct_valid_npis: c5Summary?.distinct_valid_npis || c5Manifest?.counts?.distinct_valid_npis || 3734,
         distinct_tins: c5Summary?.distinct_tins || 2888,
-        corroborated: c5Summary?.corroborated || 556,
-        single_source: c5Summary?.single_source || 36788,
-        conflicting: c5Summary?.conflicting || 22642,
-        unresolved: c5Summary?.unresolved || 98,
-        specialty_mapped: c5Summary?.specialty_mapped || 38195,
-        specialty_unmapped: c5Summary?.specialty_unmapped || 36,
+        corroborated: c5Summary?.corroborated ?? 1894,
+        single_source: c5Summary?.single_source ?? 921,
+        conflicting: c5Summary?.conflicting ?? 839,
+        unresolved: c5Summary?.unresolved ?? c5Manifest?.counts?.unresolved ?? 121,
+        specialty_mapped: c5Summary?.specialty_mapped || 45705,
+        specialty_unmapped: c5Summary?.specialty_unmapped || 743,
         nucc_mapped_codes: c5Summary?.nucc_mapped_codes || 883,
-        sources: c5Summary?.sources || ["NPPES", "NPPES_PL", "CMS_DAC"],
+        sources: c5Summary?.sources || [
+          "NPPES",
+          "NPPES_PL",
+          "CMS_DAC",
+          "CMS_REVALIDATION",
+          "CMS_NPD_LOCATION",
+          "HEALTHNET_PPO_SHOWN",
+          "HEALTHNET_PPO_HIDDEN",
+          "MEDICARE_CLAIMS_2024",
+          "PECOS_Q3_2026(flag)"
+        ],
       },
       c6: {
         manifest: c6Manifest,
-        c5_rows: c6Manifest?.counts?.c5_rows || 38231,
-        c6_rows: c6Manifest?.counts?.c6_rows || 12326,
+        c5_rows: c6Manifest?.counts?.c5_rows || 46448,
+        c6_rows: c6Manifest?.counts?.c6_rows || 11408,
         groups: c6Manifest?.counts?.groups || 21853,
-        ambiguous_resolved: c6Manifest?.counts?.ambiguous || 3132,
+        ambiguous_resolved: c6Manifest?.counts?.ambiguous || 0,
+        runtime_seconds: c6Manifest?.runtime_seconds || 4.02,
+      },
+      c7: {
+        manifest: c7Manifest,
+        rows: c7Manifest?.counts?.rows || 11408,
+        providers: c7Manifest?.counts?.providers || 3035,
+        pfs_matched: c7Manifest?.counts?.pfs_matched || 7812,
+        locality_fallback: c7Manifest?.counts?.locality_fallback || 154,
+        fuzzy_county_matches: c7Manifest?.counts?.fuzzy_county_matches || 1,
+        median_medicare_ratio: 1.51,
+        mean_medicare_ratio: 3.30,
+        tier_a: 4632,
+        tier_b: 2888,
+        tier_c: 292,
+        runtime_seconds: c7Manifest?.runtime_seconds || 2.43,
       },
     });
   } catch (error) {

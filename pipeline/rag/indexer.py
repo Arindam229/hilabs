@@ -114,6 +114,7 @@ def extract_chunks(root_dir: Path) -> list[dict[str, Any]]:
         ("C4 (Rate Extraction & Conflicts)", "data/stage/c4/_manifest.json", "data/stage/c4/c4_summary.json"),
         ("C5 (Address Corroboration & Taxonomy)", "data/stage/c5/_manifest.json", "data/stage/c5/c5_summary.json"),
         ("C6 (Final Rates Deliverable)", "data/stage/c6/_manifest.json", None),
+        ("C7 (Cost-Effectiveness & Benchmark Scoring)", "data/stage/c7/_manifest.json", None),
     ]
 
     for stage_name, manifest_rel, summary_rel in manifest_map:
@@ -190,16 +191,16 @@ def extract_chunks(root_dir: Path) -> list[dict[str, Any]]:
             "data/stage/c5/c5result.csv",
             "C5 Stage Data Catalog",
             (
-                "Table: c5_result (38,231 records linking NPI, TIN, Address, Specialty, Rate)\n"
+                "Table: c5_result (46,448 records linking NPI, TIN, Address, Specialty, Rate)\n"
                 "Columns:\n"
-                "- NPI (BIGINT): 10-digit Provider NPI\n"
-                "- TIN (VARCHAR): Taxpayer ID\n"
+                "- NPI (BIGINT): 10-digit Provider NPI (3,734 valid distinct NPIs)\n"
+                "- TIN (VARCHAR): Taxpayer ID (2,888 distinct TINs)\n"
                 "- Address (VARCHAR): USPS-standardized practicing physical address\n"
                 "- Billing_Code (VARCHAR): CPT/HCPCS billing code\n"
                 "- Specialty (VARCHAR): NUCC mapped clinical specialty (883 distinct taxonomy codes)\n"
                 "- Rate (DOUBLE): Curated negotiated rate\n"
-                "- Address_Status (VARCHAR): CORROBORATED (278), SINGLE_SOURCE (18,394), CONFLICTING (19,510), UNRESOLVED (49)\n"
-                "- Address_Evidence_Tier (VARCHAR): Tier 2 (323), Tier 3 (37,859), Tier 4 (49)\n"
+                "- Address_Status (VARCHAR): CORROBORATED (1,894), SINGLE_SOURCE (921), CONFLICTING (839), UNRESOLVED (121)\n"
+                "- Multi-Source Evidence: NPPES, NPPES Practice Location, CMS DAC, CMS Revalidation Reassignments (314 matches), CMS NPD API Location, HealthNet Directory (2,920 NPIs), Medicare 2024 Claims (504 NPIs), PECOS Enrollment (2,603 CA NPIs)\n"
                 "- Selection_Rule (VARCHAR): Provenance selection rule from C4."
             ),
         ),
@@ -208,11 +209,26 @@ def extract_chunks(root_dir: Path) -> list[dict[str, Any]]:
             "data/out/final_provider_rates.xlsx",
             "C6 Stage Data Catalog",
             (
-                "Workbook: final_provider_rates.xlsx (12,326 final deduplicated provider rate rows)\n"
+                "Workbook: final_provider_rates.xlsx (11,408 final deduplicated provider rate rows)\n"
                 "Sheets:\n"
                 "1. Curated Rates: NPI, TIN, Address, Billing Code, Specialty, Rate, Address_Status, Selection_Rule\n"
                 "2. Data Quality: Stage C3 file scorecard, validation rates, duplicate rates\n"
-                "3. Audit and Sources: Full trace of candidate resolution for 3,132 ambiguous addresses."
+                "3. Audit and Sources: Full trace of candidate resolution for ambiguous addresses with 0 duplicate keys remaining."
+            ),
+        ),
+        (
+            "C7 Cost-Effectiveness & Benchmark Scoring (data/out/c7_cost_effectiveness.xlsx)",
+            "data/out/c7_cost_effectiveness.xlsx",
+            "C7 Stage Data Catalog",
+            (
+                "Workbook: c7_cost_effectiveness.xlsx (11,408 provider rates scored against CMS Medicare PFS)\n"
+                "Counts: 3,035 unique healthcare providers scored, 7,812 direct Medicare PFS matches, 154 locality fallbacks.\n"
+                "Benchmarking Tiers:\n"
+                "- Tier A (Specialty + Code Benchmark): 4,632 rows comparing provider rate to peer specialty median\n"
+                "- Tier B (Code-Only Peer Benchmark): 2,888 rows\n"
+                "- Tier C (Direct Medicare PFS Only): 292 rows\n"
+                "Key Metrics: Median Medicare Ratio is 1.51x base CMS fee schedule rate (Mean: 3.30x).\n"
+                "Detail File: data/stage/c7/c7_code_detail.csv contains granular npi, tin, billing_code, locality, medicare_ratio, tier."
             ),
         ),
     ]

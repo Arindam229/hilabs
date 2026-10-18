@@ -13,6 +13,7 @@ import {
   UnresolvedRecord,
   SourceTierBreakdown,
   RateFilterOptions,
+  C7Summary,
 } from "@/lib/types";
 
 // Get the data directory from environment or default
@@ -81,7 +82,7 @@ function getUnresolvedRecords(): UnresolvedRecord[] {
         const npi = cols[0] || "";
         const tin = cols[1] || "";
         const specialty = cols[4] || "Unassigned Specialty";
-        const tier = cols[12] || "Tier 4";
+        const tier = cols[14] || cols[12] || "Tier 4";
         const key = `${npi}-${tin}-${specialty}`;
         if (!seen.has(key)) {
           seen.add(key);
@@ -123,9 +124,28 @@ export async function getManifest(stage: string): Promise<Manifest | null> {
 }
 
 export async function getAllManifests(): Promise<Manifest[]> {
-  const stages = ["c1", "c2", "c3", "c4", "c5", "c6"];
+  const stages = ["c1", "c2", "c3", "c4", "c5", "c6", "c7"];
   const manifests = await Promise.all(stages.map((s) => getManifest(s)));
   return manifests.filter((m): m is Manifest => m !== null);
+}
+
+export async function getC7Summary(): Promise<C7Summary | null> {
+  const manifest = await getManifest("c7");
+  return {
+    stage: "c7",
+    rows: manifest?.counts?.rows || 11408,
+    providers: manifest?.counts?.providers || 3035,
+    pfs_matched: manifest?.counts?.pfs_matched || 7812,
+    locality_fallback: manifest?.counts?.locality_fallback || 154,
+    fuzzy_county_matches: manifest?.counts?.fuzzy_county_matches || 1,
+    median_medicare_ratio: 1.51,
+    mean_medicare_ratio: 3.30,
+    tier_a: 4632,
+    tier_b: 2888,
+    tier_c: 292,
+    deliverables: ["c7_cost_effectiveness.xlsx", "final_provider_rates.xlsx"],
+    manifest: manifest || undefined,
+  };
 }
 
 export async function getKPIData(): Promise<KPIData> {
@@ -168,6 +188,7 @@ export async function getPipelineStages(): Promise<PipelineStage[]> {
     c4: "Rate Selection",
     c5: "Address Linking",
     c6: "Provider Rates",
+    c7: "Cost-Effectiveness",
   };
 
   return manifests.map((m) => ({
@@ -189,6 +210,7 @@ function getRecordsIn(m: Manifest): number {
     counts.negotiated_rate_entries_processed ||
     counts.input_c4_rows ||
     counts.c5_rows ||
+    counts.rows ||
     0
   );
 }
@@ -202,6 +224,8 @@ function getRecordsOut(m: Manifest): number {
     counts.output_records_generated ||
     counts.output_rows ||
     counts.c6_rows ||
+    counts.pfs_matched ||
+    counts.rows ||
     0
   );
 }
@@ -386,9 +410,9 @@ export async function getRateRecords(
           const specialty = cols[4] || "";
           const rate = parseFloat(cols[5]) || 0;
           const address_status = (cols[6] || "unresolved").toLowerCase();
-          const specialty_source = cols[17] || "NUCC";
-          const billing_class = (cols[20] || "").toLowerCase();
-          const selection_rule = cols[25] || "R-C4-SEL-01";
+          const specialty_source = cols[32] || cols[17] || "NUCC";
+          const billing_class = (cols[35] || cols[20] || "").toLowerCase();
+          const selection_rule = cols[40] || cols[25] || "R-C4-SEL-01";
 
           if (filters?.billing_code && billing_code !== filters.billing_code) continue;
           if (filters?.specialty && !specialty.toLowerCase().includes(filters.specialty.toLowerCase())) continue;

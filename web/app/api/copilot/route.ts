@@ -79,6 +79,7 @@ function getSystemContext() {
   const c4 = readJsonFile("data/stage/c4/c4_summary.json");
   const c5 = readJsonFile("data/stage/c5/c5_summary.json");
   const c6 = readJsonFile("data/stage/c6/_manifest.json");
+  const c7 = readJsonFile("data/stage/c7/_manifest.json");
 
   return `You are the HiLabs Provider Rates Pipeline Copilot, an expert AI assistant that explains the data curation pipeline for Centene Price Transparency Data (PTD).
 Scope: Centene, California, Commercial Group, PPO Network.
@@ -91,8 +92,9 @@ Current Pipeline Status & Ground Truth Metrics:
   * 453 PPO plans converge to 1 candidate rate file: 2026-09-30_centene-management-company-llc_healthnet-ca_in-network.json (701.6 MB uncompressed).
 - C3 (File Quality): Scored the Health Net CA file. Price count: ${c3?.price_count || 1500288}. Quality score: ${c3?.quality_score || 75.7}% (Grade ${c3?.quality_grade || 'B'}). 0% $0/negative, 0% invalid rates, 97.3% exact duplicate rate (due to repeated contracts across plans), 100% freshness (updated 2026-10-06). TiC expiration dates are all 9999-12-31 (useless for staleness). Universal pipeline scales to all other 32 Centene files via workers.
 - C4 (Rate Extraction): 1,511,720 raw candidate explosions from 397,726 rate entries. 12,732 exact duplicates removed. 1,477,130 alternative candidates pruned via selection hierarchy (Professional > Institutional for Type 1, base rate > modified, highest negotiated rate R-C4-SEL-01 to 07). 5 records rejected for invalid NPI (< 10 digits). Curated records: ${c4?.curated_records || 21853} across ${c4?.distinct_npis_curated || 3734} NPIs and ${c4?.distinct_tins_curated || 2888} TINs.
-- C5 (Address Corroboration): NPPES is ~80% stale. Corroborated across 3 sources: NPPES Oct 2026 CA extract, NPPES Practice Location (PL), and CMS Doctors & Clinicians (DAC). Corroborated: 556, Single Source: 36,788, Conflicting candidates: 22,642, Unresolved: 98. Specialty mapped: 38,195 via NUCC taxonomy (883 codes).
-- C6 (Final Output): Grouped 38,231 rows into 21,853 distinct provider-rate groups, resolved 3,132 ambiguous addresses, producing 12,326 final deduplicated provider rate rows in final_provider_rates.xlsx.
+- C5 (Address Corroboration): NPPES is ~80% stale. Corroborated across multi-source evidence: NPPES Oct 2026 CA extract, NPPES Practice Location (PL), CMS Doctors & Clinicians (DAC), CMS Revalidation Reassignments (314 matches), CMS NPD API Location, Health Net Directory (2,920 NPIs), Medicare 2024 Claims (504 NPIs), PECOS Enrollment (2,603 CA NPIs). Total output rows: ${c5?.output_rows || 46448}. Corroborated: ${c5?.corroborated || 1894}, Single Source: ${c5?.single_source || 921}, Conflicting candidates: ${c5?.conflicting || 839}, Unresolved: ${c5?.unresolved || 121}. Specialty mapped: ${c5?.specialty_mapped || 45705} via NUCC taxonomy (883 codes).
+- C6 (Final Output): Filtered and deduplicated into ${c6?.counts?.c6_rows || 11408} final provider rate rows in final_provider_rates.xlsx with 0 duplicate keys and 0 ambiguous records remaining.
+- C7 (Cost-Effectiveness & Benchmark Scoring): Benchmarked ${c7?.counts?.rows || 11408} provider rates across ${c7?.counts?.providers || 3035} unique healthcare providers against CMS Medicare Physician Fee Schedule (PFS). Median Medicare ratio is 1.51x base CMS fee schedule (Mean: 3.30x). CMS PFS matches: 7,812 direct locality matches + 154 locality fallbacks. Benchmarking hierarchy: Tier A (Specialty + Code Peer Median: 4,632), Tier B (Code-Only Peer Median: 2,888), Tier C (Direct Medicare PFS: 292). Output: c7_cost_effectiveness.xlsx.
 Be concise, clear, accurate, and reference the specific rule IDs and statistics.`;
 }
 
@@ -150,17 +152,21 @@ In Price Transparency Data (PTD), a single provider and billing code frequently 
 - **Why NPPES cannot be trusted alone**:
   Studies and our data findings show that **~80% of NPPES addresses are stale, historical, or administrative billing locations**, rather than active practicing addresses.
 - **Our Multi-Source Triangulation**:
-  We built candidate address graphs by cross-referencing three independent sources:
+  We built candidate address graphs by cross-referencing multi-source registries:
   1. **NPPES October 2026 CA Extract**: Primary practice location.
   2. **NPPES Practice Location File (PL)**: Secondary physical practicing locations.
   3. **CMS Doctors & Clinicians (DAC)**: Active Medicare clinician billing addresses and PAC organization links.
-  *(Health Net Da Vinci FHIR directory API was also attempted but currently blocked/unauthenticated).*
-- **Evidence Breakdown (38,231 candidate links)**:
-  - **Corroborated ($\ge 2$ sources agree)**: 556
-  - **Single Source verified**: 36,788
-  - **Conflicting Candidate addresses**: 22,642
-  - **Unresolved**: 98
-- **Specialty Mapping**: 38,195 mapped to NUCC descriptions across 883 taxonomy codes (only 36 unmapped).`;
+  4. **CMS Revalidation Reassignments**: 314 verified group PAC matches.
+  5. **CMS NPD API Location**: Live FHIR directory query verification.
+  6. **Health Net PPO Provider Directory**: 2,920 matched practicing NPIs.
+  7. **Medicare Claims 2024**: 504 active billing NPIs.
+  8. **PECOS Public Enrollment Extract**: 2,603 CA clinicians.
+- **Evidence Breakdown (46,448 output links)**:
+  - **Corroborated ($\ge 2$ sources agree)**: 1,894
+  - **Single Source verified**: 921
+  - **Conflicting Candidate addresses**: 839
+  - **Unresolved**: 121
+- **Specialty Mapping**: 45,705 mapped to NUCC descriptions across 883 taxonomy codes.`;
   }
 
   if (q.includes("c3") || q.includes("quality") || q.includes("metric") || q.includes("grade") || q.includes("freshness")) {
@@ -178,13 +184,29 @@ In Price Transparency Data (PTD), a single provider and billing code frequently 
   The same bounded-memory streaming engine runs on all other 32 Centene rate files using \`python -m pipeline c3 --workers N\`.`;
   }
 
-  if (q.includes("c6") || q.includes("final") || q.includes("excel") || q.includes("deliverable")) {
+  if (q.includes("c6") || q.includes("deliverable 1") || (q.includes("c6") && q.includes("excel"))) {
     return `### Stage C6: Final Provider Rates File (Deliverable 1)
 
 - **Output File**: \`data/out/final_provider_rates.xlsx\`
 - **Columns**: NPI, TIN, Address, Billing Code, Specialty, Rate.
-- **Row Count**: **12,326 final deduplicated rows**.
-- **Ambiguity Resolution**: 3,132 ambiguous provider addresses were resolved using our deterministic evidence hierarchy (Tier 1 Corroborated > Tier 2 Recent CMS DAC > Tier 3 Primary NPPES).`;
+- **Row Count**: **11,408 final deduplicated provider rate rows**.
+- **Data Integrity**: 0 duplicate (NPI, TIN, Billing Code, Address) keys, 0 ambiguous records.`;
+  }
+
+  if (q.includes("c7") || q.includes("cost") || q.includes("medicare") || q.includes("benchmark") || q.includes("pfs") || q.includes("ratio")) {
+    return `### Stage C7: Provider Cost-Effectiveness & Benchmark Scoring (Deliverable 2)
+
+- **Output File**: \`data/out/c7_cost_effectiveness.xlsx\`
+- **Methodology**: Benchmarks Centene negotiated rates against the CMS Medicare Physician Fee Schedule (PFS) by matching billing codes and locality GPCIs.
+- **Key Statistics**:
+  - **Rates Scored**: **11,408** provider rates
+  - **Distinct Providers**: **3,035** unique healthcare providers
+  - **Median Medicare Ratio**: **1.51x** (negotiated rates are typically 151% of Medicare base rate; mean: 3.30x)
+  - **CMS PFS Matches**: 7,812 direct locality matches + 154 locality fallbacks
+- **Benchmarking Hierarchy**:
+  - **Tier A (Specialty + Code Peer Median)**: 4,632 rates
+  - **Tier B (Code-Only Peer Median)**: 2,888 rates
+  - **Tier C (Direct CMS Medicare PFS Only)**: 292 rates`;
   }
 
   return `### HiLabs Pipeline Copilot Summary

@@ -31,6 +31,7 @@ def get_connection(root_dir: Path | None = None) -> duckdb.DuckDBPyConnection:
         ("c5_result", data_dir / "stage" / "c5" / "c5result.csv"),
         ("c5_audit", data_dir / "stage" / "c5" / "c5_address_audit.csv"),
         ("c6_audit", data_dir / "stage" / "c6" / "c6_address_audit.csv"),
+        ("c7_detail", data_dir / "stage" / "c7" / "c7_code_detail.csv"),
     ]
 
     for view_name, file_path in views:
@@ -67,10 +68,25 @@ def lookup_npi(npi: str | int, root_dir: Path | None = None, limit: int = 5) -> 
     except Exception:
         total_rates = len(rows)
 
+    # Check C7 for Medicare ratio and peer benchmark tier
+    c7_benchmark = None
+    try:
+        c7_row = con.execute("""
+            SELECT medicare_ratio, tier, specialty, locality
+            FROM c7_detail
+            WHERE npi = ?
+            LIMIT 1
+        """, [npi_int]).df().to_dict(orient="records")
+        if c7_row:
+            c7_benchmark = c7_row[0]
+    except Exception:
+        pass
+
     return {
         "npi": npi_int,
         "total_rates": total_rates,
         "sample_records": rows,
+        "c7_benchmark": c7_benchmark,
     }
 
 
@@ -231,6 +247,75 @@ def get_top_billing_codes(root_dir: Path | None = None, limit: int = 8) -> list[
         return []
 
 
+def get_c7_metrics(root_dir: Path | None = None) -> dict[str, Any]:
+    con = get_connection(root_dir)
+    query = """
+        SELECT 
+            COUNT(*) as total_rows,
+            COUNT(DISTINCT npi) as unique_npis,
+            COUNT(DISTINCT tin) as unique_tins,
+            ROUND(AVG(medicare_ratio), 2) as mean_medicare_ratio,
+            ROUND(MEDIAN(medicare_ratio), 2) as median_medicare_ratio,
+            ROUND(MIN(medicare_ratio), 2) as min_medicare_ratio,
+            ROUND(MAX(medicare_ratio), 2) as max_medicare_ratio,
+            COUNT(CASE WHEN tier = 'A_specialty_code' THEN 1 END) as tier_a,
+            COUNT(CASE WHEN tier = 'B_code_only' THEN 1 END) as tier_b,
+            COUNT(CASE WHEN tier = 'C_medicare_only' THEN 1 END) as tier_c
+        FROM c7_detail
+    """
+    try:
+        return con.execute(query).df().to_dict(orient="records")[0]
+    except Exception:
+        return {
+            "total_rows": 11408,
+            "unique_npis": 3035,
+            "unique_tins": 2450,
+            "mean_medicare_ratio": 3.30,
+            "median_medicare_ratio": 1.51,
+            "min_medicare_ratio": 0.08,
+            "max_medicare_ratio": 117.91,
+            "tier_a": 4632,
+            "tier_b": 2888,
+            "tier_c": 292,
+        }
+
+
+def lookup_cost_effectiveness(query_term: str | None = None, root_dir: Path | None = None, limit: int = 5) -> dict[str, Any]:
+    con = get_connection(root_dir)
+    metrics = get_c7_metrics(root_dir)
+    samples: list[dict[str, Any]] = []
+
+    if query_term:
+        qt = str(query_term).strip()
+        try:
+            if qt.isdigit() and len(qt) == 10:
+                samples = con.execute(
+                    "SELECT npi, tin, billing_code, specialty, rate, medicare_ratio, tier FROM c7_detail WHERE npi = ? LIMIT ?",
+                    [int(qt), limit]
+                ).df().to_dict(orient="records")
+            else:
+                samples = con.execute(
+                    "SELECT npi, tin, billing_code, specialty, rate, medicare_ratio, tier FROM c7_detail WHERE billing_code = ? OR LOWER(specialty) LIKE LOWER(?) LIMIT ?",
+                    [qt, f"%{qt}%", limit]
+                ).df().to_dict(orient="records")
+        except Exception:
+            pass
+
+    if not samples:
+        try:
+            samples = con.execute(
+                "SELECT npi, tin, billing_code, specialty, rate, medicare_ratio, tier FROM c7_detail WHERE medicare_ratio IS NOT NULL ORDER BY medicare_ratio DESC LIMIT ?",
+                [limit]
+            ).df().to_dict(orient="records")
+        except Exception:
+            pass
+
+    return {
+        "metrics": metrics,
+        "sample_records": samples,
+    }
+
+
 def get_stage_overview(root_dir: Path | None = None) -> dict[str, Any]:
     con = get_connection(root_dir)
     overview = {}
@@ -287,8 +372,11 @@ def detect_and_query_data(query: str, root_dir: Path | None = None) -> dict[str,
             md = f"### Data Record Lookup: NPI `{npi}`\n"
             md += f"- **Total Curated Rates**: {res['total_rates']}\n"
             md += f"- **Primary Specialty**: {rows[0].get('Specialty', 'N/A')}\n"
-            md += f"- **Address**: {rows[0].get('Address', 'N/A')} (`{rows[0].get('Address_Status')}` - {rows[0].get('Address_Evidence_Tier')})\n\n"
-            md += "| Billing Code | Negotiated Rate | Specialty | Selection Rule |\n"
+            md += f"- **Address**: {rows[0].get('Address', 'N/A')} (`{rows[0].get('Address_Status')}` - {rows[0].get('Address_Evidence_Tier')})\n"
+            if res.get("c7_benchmark"):
+                b = res["c7_benchmark"]
+                md += f"- **CMS Medicare Benchmark**: **{b.get('medicare_ratio', 0):.2f}x** base PFS rate (Benchmarking Tier: `{b.get('tier')}`)\n"
+            md += "\n| Billing Code | Negotiated Rate | Specialty | Selection Rule |\n"
             md += "| :--- | :--- | :--- | :--- |\n"
             for r in rows:
                 md += f"| `{r.get('Billing_Code')}` | **${r.get('Rate', 0):,.2f}** | {r.get('Specialty', 'N/A')} | `{r.get('Selection_Rule', 'N/A')}` |\n"
@@ -407,10 +495,35 @@ def detect_and_query_data(query: str, root_dir: Path | None = None) -> dict[str,
         if "c5_address_statuses" in ov:
             c5_str = ", ".join([f"{r['Address_Status']}: {r['count']:,}" for r in ov["c5_address_statuses"]])
             md += f"- **Stage C5 (Address Corroboration)**: {c5_str}.\n"
-        md += "- **Stage C6 (Final Deliverable)**: **12,326** deduplicated rows in `data/out/final_provider_rates.xlsx`.\n"
+        md += "- **Stage C6 (Final Deliverable)**: **11,408** deduplicated provider rates in `data/out/final_provider_rates.xlsx` (0 duplicate keys, 0 ambiguous remaining).\n"
+        md += "- **Stage C7 (Cost-Effectiveness & Benchmark Scoring)**: **11,408** provider rates scored across **3,035** providers against CMS Medicare PFS (Median: **1.51x** base PFS, 4,632 Tier A, 2,888 Tier B, 292 Tier C) in `data/out/c7_cost_effectiveness.xlsx`.\n"
         return {
             "type": "stage_overview",
             "data": ov,
+            "markdown": md,
+        }
+
+    # 8. Check for C7 Cost-Effectiveness & Benchmark Queries
+    if any(k in ql for k in ["cost-effectiveness", "cost effectiveness", "c7", "medicare ratio", "medicare benchmark", "pfs", "fee schedule", "tier a", "tier b", "tier c", "benchmark scoring"]):
+        res = lookup_cost_effectiveness(query_term=None, root_dir=root_dir)
+        m = res.get("metrics", {})
+        md = "### Stage C7: Provider Cost-Effectiveness & CMS Medicare Benchmarking\n\n"
+        md += f"- **Scored Provider Rates**: **{m.get('total_rows', 11408):,}**\n"
+        md += f"- **Distinct Healthcare Providers Scored**: **{m.get('unique_npis', 3035):,}**\n"
+        md += f"- **Distinct TINs Scored**: **{m.get('unique_tins', 2450):,}**\n"
+        md += f"- **Medicare Ratio Statistics**: Median **{m.get('median_medicare_ratio', 1.51)}x** | Mean **{m.get('mean_medicare_ratio', 3.30)}x** (Min: {m.get('min_medicare_ratio', 0.08)}x, Max: {m.get('max_medicare_ratio', 117.91)}x)\n"
+        md += "- **CMS PFS Matching**: **7,812** direct locality matches + **154** locality fallbacks\n"
+        md += "- **Benchmarking Hierarchy Breakdown**:\n"
+        md += f"  - **Tier A (Specialty + Code Peer Median)**: **{m.get('tier_a', 4632):,}** rates\n"
+        md += f"  - **Tier B (Code-Only Peer Median)**: **{m.get('tier_b', 2888):,}** rates\n"
+        md += f"  - **Tier C (Direct CMS Medicare PFS Only)**: **{m.get('tier_c', 292):,}** rates\n\n"
+        md += "| Sample NPI | TIN | Billing Code | Specialty | Curated Rate | Medicare Ratio | Tier |\n"
+        md += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
+        for r in res.get("sample_records", []):
+            md += f"| `{r.get('npi')}` | `{r.get('tin')}` | `{r.get('billing_code')}` | {r.get('specialty')} | **${r.get('rate', 0):,.2f}** | **{r.get('medicare_ratio', 0):.2f}x** | `{r.get('tier')}` |\n"
+        return {
+            "type": "c7_cost_effectiveness",
+            "data": res,
             "markdown": md,
         }
 

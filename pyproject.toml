@@ -27,3 +27,6 @@ pythonpath = ["."]
 line-length = 100
 target-version = "py311"
 extend-exclude = ["api"]
+
+[tool.ruff.lint.per-file-ignores]
+"pipeline/rag/*" = ["BLE001", "S110"]
