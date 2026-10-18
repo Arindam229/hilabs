@@ -69,7 +69,7 @@ def _semantic_ppo_score(plan_name: str) -> float | None:
         return None
 
 
-def classify_plan(row: Mapping[str, str], use_embeddings: bool = False) -> dict[str, str]:
+def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[str, str]:
     """Classify plan only; rate membership needs C2 in-file evidence."""
     classified = dict(row)
     plan_name = classified.get("plan_name", "")
@@ -184,7 +184,7 @@ def run_c2(cfg: Config) -> StageResult:
     if not plans_path.is_file():
         raise FileNotFoundError(f"C2 needs C1 output: {plans_path}. Run `make c1` first.")
     started_at = time.monotonic()
-    plans = [classify_plan(row) for row in pq.read_table(plans_path).to_pylist()]
+    plans = [classify_plan(row, use_embeddings=True) for row in pq.read_table(plans_path).to_pylist()]
     rate_files = unique_ppo_rate_files(plans)
     stage_dir = cfg.stage_dir("c2")
     stage_dir.mkdir(parents=True, exist_ok=True)
