@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from pipeline.config import Config
-from pipeline.io.archive import as_zip, open_source_zip, require_member
+from pipeline.io.archive import as_zip, find_member, open_source_zip, require_member
 from pipeline.io.manifest import write_manifest
 
 C5_COLUMNS = [
@@ -930,6 +930,31 @@ def _build_cms_npd(npi_set: set[str], cache_dir: Path, max_npis: int, workers: i
     return result, stats
 
 
+def _seed_caches_from_archive(archive: Path, out_dir: Path) -> dict[str, int]:
+    """Seed C5's API caches from the archive's caches/ folder so a fresh machine reproduces the shipped
+    results offline. Local entries win; missing ones are copied in. API calls then cover only the rest."""
+    stats = {"npd_seeded": 0, "geocode_seeded": 0}
+    with zipfile.ZipFile(archive) as z:
+        geo = find_member(z, "caches/census_geocode_cache.json")
+        if geo:
+            dest = out_dir / "census_geocode_cache.json"
+            local = json.loads(dest.read_text()) if dest.is_file() else {}
+            merged = json.loads(z.read(geo)) | local
+            stats["geocode_seeded"] = len(merged) - len(local)
+            dest.write_text(json.dumps(merged, sort_keys=True) + "\n")
+        npd = find_member(z, "caches/cms_npd_cache.zip")
+        if npd:
+            cache = out_dir / "cms_npd_cache"
+            cache.mkdir(parents=True, exist_ok=True)
+            with z.open(npd) as raw, zipfile.ZipFile(raw) as nz:
+                for name in nz.namelist():
+                    target = cache / Path(name).name
+                    if name.endswith(".json") and not target.exists():
+                        target.write_bytes(nz.read(name))
+                        stats["npd_seeded"] += 1
+    return stats
+
+
 def _nucc_specialty(code: str, nucc: dict[str, dict[str, str]]) -> str:
     if not code:
         return ""
@@ -981,6 +1006,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     with open_source_zip(outer_zip, cfg.pecos_enrollment_member, cfg.pecos_enrollment_zip) as (z, src):
         pecos_states, pecos_stats = ext.load_pecos_states(z, npi_set)
         pecos_stats["file"] = src
+    cache_seed_stats = _seed_caches_from_archive(outer_zip, out_dir)
     npd_map: dict[str, list[dict[str, str]]] = {npi: [] for npi in npi_set}
     npd_stats: dict[str, Any] = {"enabled": False}
     if os.environ.get("PTD_NPD_API", "1") == "1":  # on by default; PTD_NPD_API=0 disables
@@ -1361,6 +1387,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         "healthnet": hn_stats,
         "medicare_claims_2024": mcr_stats,
         "pecos_enrollment": pecos_stats,
+        "cache_seed": cache_seed_stats,
     }
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
