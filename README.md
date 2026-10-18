@@ -53,6 +53,29 @@ Centene index files ─► C1 parse ─► C2 PPO network ─► C3 grade files 
 | **C6** Address verification | Rows with ≥ 2 independent sources agreeing on the address: **4.8 % → 25.0 %** (strong sources) / **57.1 %** (incl. hidden payer listings) | offline analysis of the C6 file, 2026-10-18 |
 | **C7** Cost-effectiveness | 3,008 providers scored against Medicare-anchored, locality-adjusted peers; 336 honestly marked *Insufficient data* | in-memory run on the C6 file, 2026-10-18 |
 
+### Plots for insights
+
+**C2: how 3,274 Centene plans narrow to 453 CA commercial-group PPO plans (every bar is a rule ID)**
+![C2 plan classification](docs/assets/c2_classification.png)
+
+**C2: why rules decide. NLP embedding scores never reach 0.5 (max 0.418), so a 0.8 threshold would miss every PPO plan**
+![C2 NLP score distribution](docs/assets/c2_nlp_score_distribution.png)
+
+**C3: file-quality scorecard for the Health Net CA file (92.9, A); code coverage is the one weak dimension**
+![C3 quality metrics](docs/assets/c3_quality_metrics.png)
+
+**C4: from 1,717 services to 21,853 curated rates (log scale)**
+![C4 extraction funnel](docs/assets/c4_extraction_funnel.png)
+
+**C5: the heuristic address-scoring weights; no single non-CMS source reaches VERIFIED alone**
+![C5 scoring weights](docs/assets/c5_scoring_weights.png)
+
+**C6: what verifies each final row; payer and claims evidence lifts verification from 4.8 % to 25.0 % (strong) / 57.1 % (total)**
+![C6 verification by source](docs/assets/c6_verification_by_source.png)
+
+**C7: providers by price-vs-peers × breadth quadrant**
+![C7 quadrants](docs/assets/c7_quadrants.png)
+
 ---
 
 ## 2. The problem
@@ -69,6 +92,8 @@ Payers publish negotiated rates as TiC machine-readable files, but those rates a
 ---
 
 ## 3. Architecture
+
+![Pipeline architecture](docs/assets/pipeline_architecture.png)
 
 ```mermaid
 flowchart LR
