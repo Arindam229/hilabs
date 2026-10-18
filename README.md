@@ -128,6 +128,18 @@ Run checks:
 make test
 ```
 
+## C5/C6: address mapping and final workbook
+
+```bash
+make c5
+make c6
+```
+
+C5 streams NPPES, CMS DAC and NUCC from the outer dataset ZIP, maps practice
+addresses to C4 providers, enriches specialties, and writes `c5result.csv`,
+`c5_address_audit.csv`, and `c5_summary.json`. C6 selects one canonical address
+per `(NPI, TIN, Billing Code)` and writes `data/out/final_provider_rates.xlsx`.
+
 ## Repository layout
 
 ```text
