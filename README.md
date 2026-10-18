@@ -137,41 +137,140 @@ flowchart LR
 
 ## 4. Quickstart
 
-**Requirements:** Python 3.11+, [`uv`](https://docs.astral.sh/uv/), about 5 GB of free disk (2.4 GB archive plus about 2 GB of stage outputs), 8 GB+ RAM, Linux or macOS (Windows via WSL), and the dataset archive.
+### 4.1 Requirements
+
+| Need | Version / size | Install |
+|---|---|---|
+| OS | Linux or macOS (Windows: use WSL) | — |
+| Python | 3.11+ (uv installs it if missing) | — |
+| `uv` | any recent | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| `git`, `make`, `unzip` | any | `sudo apt install git make unzip` (macOS: `xcode-select --install`) |
+| Disk / RAM | about **5 GB** free (2.4 GB archive + about 2 GB outputs), **8 GB+** RAM | — |
+| Dataset archive | `hilabs_dataset_2026-10-17.zip` (2.39 GB, 136 members) | Download link: **_to be added_** |
+| *Optional:* Ollama | latest | `curl -fsSL https://ollama.com/install.sh \| sh` (or https://ollama.com/download) |
+| *Optional:* Node.js | 18.18+ (for the Next.js 15 dashboard) | https://nodejs.org |
+
+### 4.2 Install and verify
 
 ```bash
-git clone https://github.com/sivk-kex/hilabs.git && cd hilabs
-make setup                                   # uv sync
+git clone https://github.com/sivk-kex/hilabs.git
+cd hilabs
+make setup                                    # uv sync --all-groups: creates .venv with all dependencies
+make test                                     # ruff + pytest; should pass before any data is present
 
-# Put the dataset archive at data/hilabs_dataset_2026-10-17.zip
-# (or: export PTD_DATA_DIR=/folder/containing/the/zip)
-
-PTD_NPD_API=1 make pipeline                  # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7
-make test                                    # ruff + pytest
+mkdir -p data
+mv ~/Downloads/hilabs_dataset_2026-10-17.zip data/          # or: export PTD_DATA_DIR=/folder/containing/the/zip
+unzip -l data/hilabs_dataset_2026-10-17.zip | tail -1       # expect: 136 files
+unzip -p data/hilabs_dataset_2026-10-17.zip hilabs_dataset_2026-10-17/MANIFEST_additions_2026-10-18.txt | head -5
 ```
 
-Run any stage on its own, for example to restart from a point:
+### 4.3 Run the full pipeline
 
 ```bash
-make c1 && make c2          # index parsing, PPO network      → data/out/c2_ppo_network.xlsx
-make c3                     # file quality grades             → docs/deliverables/file_quality_metrics.md
-make c4                     # rate extraction                 → data/stage/c4/selected_rates.csv
-make c5hn                   # Health Net evidence, replayed offline from the archive (no API, no key)
-PTD_NPD_API=1 make c5       # address engine                  → data/stage/c5/c5result.csv
-make c6                     # final rate file                 → data/out/final_provider_rates.xlsx
-make c7                     # cost-effectiveness              → data/out/c7_cost_effectiveness.xlsx
+make pipeline                                 # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7 (about 15–20 min)
 ```
 
-| Environment variable | Effect |
+Optional extra address sources for C5 (both cached; first run makes live API calls):
+
+```bash
+PTD_NPD_API=1 PTD_NPD_MAX_NPIS=0 make c5      # CMS National Provider Directory for every NPI
+PTD_GEOCODE=1 make c5                         # Census geocoding of candidate addresses
+```
+
+### 4.4 Run or restart a single stage
+
+```bash
+make c1          # parse 11 Centene index files            → data/stage/c1/plans.parquet, rate_files.parquet
+make c2          # classify PPO plans (runs C1 first)      → data/out/c2_ppo_network.xlsx
+make c3          # grade rate files (runs C1–C2 first)     → docs/deliverables/file_quality_metrics.md
+make c4          # extract and select rates                → data/stage/c4/selected_rates.csv
+make c5hn        # Health Net PPO evidence, offline replay → data/stage/c5_healthnet/healthnet_evidence.csv
+make c5          # address engine                          → data/stage/c5/c5result.csv
+make c6          # final rate file                         → data/out/final_provider_rates.xlsx (+ .csv)
+make c7          # cost-effectiveness                      → data/out/c7_cost_effectiveness.xlsx
+
+uv run python -m pipeline all                 # same chain without make
+```
+
+### 4.5 Check the outputs
+
+```bash
+ls -lh data/out/                                              # deliverable workbooks
+cat docs/deliverables/file_quality_metrics.md                 # C3 grade table
+cat data/stage/c4/c4_summary.json                             # C4 counts
+python3 -m json.tool data/stage/c5/c5_summary.json | head -40 # C5 address statistics
+cat data/stage/*/_manifest.json                               # inputs, counts, runtime, config hash, git SHA per stage
+uv run --with matplotlib python scripts/make_readme_charts.py .   # regenerate the README charts from these outputs
+```
+
+### 4.6 Optional: refresh Health Net from the live directory
+
+`make c5hn` replays the responses archived in the dataset (as of 2026-10-18), so it needs no key and no network. To fetch a newer snapshot instead:
+
+```bash
+# save the Find-a-Provider web bundle (holds the public API key) to data/raw/healthnet_pces/app.js, then:
+uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5          # all NPIs, rate-limited, cached
+uv run python -m pipeline.stages.c5_healthnet --npi 1780886424 --quiet      # one NPI, for a quick check
+```
+
+### 4.7 Optional: Pipeline Copilot (Qwen 2.5 via Ollama)
+
+```bash
+ollama pull qwen2.5:1.5b                                          # about 986 MB, one-time download (details in §8.1)
+ollama list                                                       # confirm qwen2.5:1.5b is present
+uv run --with sentence-transformers python -m pipeline rag        # build the retrieval index from the latest outputs
+uv run --with sentence-transformers python -m pipeline.rag.server --port 8005     # RAG service on 127.0.0.1:8005
+curl -s http://127.0.0.1:8005/health                              # → {"status": "ok", ...}
+curl -s -X POST http://127.0.0.1:8005/query -H 'Content-Type: application/json' \
+     -d '{"query": "How was the C3 quality score computed?", "top_k": 4}'
+uv run --with sentence-transformers python -m pipeline.rag.engine "Why did NLP fail on PPO classification?"   # CLI, no server
+```
+
+`sentence-transformers` is optional and isn't installed by `make setup`. `uv run --with` adds it for that command only. The first run downloads `all-MiniLM-L6-v2` (about 90 MB) from Hugging Face.
+
+### 4.8 Optional: dashboard
+
+```bash
+cd web
+npm install
+npm run dev                         # http://localhost:3000 (expects the RAG service on :8005 for the copilot page)
+npm run build && npm run start      # production build
+```
+
+> Known issue: `web/package.json` doesn't yet list every package the dashboard imports (`@base-ui/react`, `recharts`, `@tanstack/react-table`, `lucide-react`, `framer-motion`, Tailwind and others). If `npm install` or the build reports a missing module, install it with `npm install <package>`.
+
+### 4.9 Environment variables
+
+None is required; set one only to change behaviour.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `PTD_DATA_DIR` | `data/` | Folder holding the dataset archive and all outputs |
+| `PTD_RATE_FILE` / `PTD_RATE_MEMBER` | C2's queued file | Extract a different TiC file (a path, or a member inside the archive) |
+| `PTD_C4_OUTPUT_DIR` | `data/stage/c4` | Where C4 writes |
+| `PTD_AS_OF` | today | Fixed reference date for C3 freshness and expiry, for reproducible reruns |
+| `PTD_C3_WORKERS` | `1` | Rate files graded in parallel |
+| `PTD_C3_SAMPLE_EVERY` / `PTD_C3_BLOCK_SIZE` | `1` / `1000` | Diagnostic sampling (C4 refuses sampled grades) |
+| `PTD_C3_ROW_FLAG_LIMIT` / `PTD_C3_MAX_OUTLIER_COHORTS` | `100000` / `50000` | Caps on C3 exception examples and outlier cohorts |
+| `PTD_NPD_API` | off | `1` enables CMS National Provider Directory lookups in C5 |
+| `PTD_NPD_MAX_NPIS` / `PTD_NPD_WORKERS` / `PTD_NPD_BASE_URL` | `100` / `4` / `https://directory.cms.gov/fhir` | Uncached NPIs per run (`0` = all), concurrency, endpoint |
+| `PTD_GEOCODE` | off | `1` enables Census geocoding in C5 |
+| `PTD_GEOCODE_WORKERS` / `PTD_GEOCODE_TIMEOUT` | `8` / `5` s | Geocoder concurrency and per-request timeout |
+| `PTD_REVALIDATION_ZIP` / `PTD_MEDICARE_PROVIDER_ZIP` / `PTD_PECOS_ENROLLMENT_ZIP` | archive `cms/` member | Use a standalone CMS file instead of the archive copy |
+| `HN_TARGET_NETWORK_IDS` | `8201,8203` | Health Net networks treated as the target PPO |
+| `PTD_HN_APP_JS` | `data/raw/healthnet_pces/app.js` | Web bundle for a live Health Net refresh |
+| `LOCAL_LLM_MODEL` / `LOCAL_LLM_URL` | `qwen2.5:1.5b` / `http://127.0.0.1:11434` | Ollama model and endpoint for the copilot |
+| `RAG_DAEMON_URL` | `http://127.0.0.1:8005` | RAG service the dashboard calls |
+
+### 4.10 Troubleshooting
+
+| Symptom | Fix |
 |---|---|
-| `PTD_DATA_DIR` | Folder that contains the dataset archive (default `data/`) |
-| `PTD_NPD_API=1` | Use the CMS National Provider Directory FHIR API in C5. Responses are cached per NPI. Each run fetches up to `PTD_NPD_MAX_NPIS` uncached NPIs (default 100; `0` = all); `PTD_NPD_WORKERS` (default 4) sets concurrency |
-| `PTD_GEOCODE=1` | Census geocoding of candidate addresses in C5 (off by default; results are cached). `PTD_GEOCODE_WORKERS` (default 8) sets concurrency |
-| `PTD_AS_OF` | Fixed reference date for freshness and expiry scoring, so reruns are reproducible |
-| `PTD_C3_WORKERS`, `PTD_C3_SAMPLE_EVERY` | C3 parallelism and explicit diagnostic sampling (C4 rejects sampled grades) |
-| `PTD_REVALIDATION_ZIP`, `PTD_MEDICARE_PROVIDER_ZIP`, `PTD_PECOS_ENROLLMENT_ZIP` | Use a standalone file in place of the copy inside the archive |
-
-**Live Health Net refresh (optional).** `make c5hn` replays the responses archived in the dataset, so a clean clone reproduces the 2026-10-18 result offline. To refresh from the live directory, run `uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5`. It is rate-limited and caches every response.
+| `C1 archive not found` | Put the zip at `data/hilabs_dataset_2026-10-17.zip` or set `PTD_DATA_DIR` |
+| `C4 needs C3 output` / `C4 cannot use sampled C3 metrics` | Run `make c3` without `PTD_C3_SAMPLE_EVERY` |
+| C5 slow or quiet after "scanned … rows" | Expected while it reads the CMS files (several minutes); with `PTD_NPD_API=1` / `PTD_GEOCODE=1` it also makes live calls. Unset them for an offline run |
+| Disk full mid-run | Free about 5 GB; C4 and C5 write large CSV audits |
+| Copilot answers without the LLM | Ollama isn't running (`ollama serve`) or the model isn't pulled. The copilot falls back to retrieved records and documents |
 
 ---
 
