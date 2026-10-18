@@ -177,18 +177,31 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
     headers = ["NPI", "TIN", "Address", "Billing Code", "Specialty", "Rate",
                "Address_Status", "Address_Source", "Taxonomy_Code", "Specialty_Source",
                "Negotiated_Type", "Billing_Class", "Address_Candidate_Count",
-               "Address_Selection_Status", "Address_Selection_Reason"]
+               "Address_Selection_Status", "Address_Selection_Reason", "Specialty_Status",
+               "Geocode_Status", "Latitude", "Longitude", "Nearest_TIN_Site_Distance_Km",
+               "Geo_Score", "Geo_Anomaly_Flag", "TIN_Modal_ZIP3", "TIN_Support_Score",
+               "TIN_Address_Link_Status"]
     ws.append(headers)
     for r in selected_rows:
+        rate = r.get("Rate", "")
+        try:
+            rate = float(rate)
+        except (TypeError, ValueError):
+            pass
         ws.append([
             r.get("NPI", ""), r.get("TIN", ""), r.get("Address", ""),
-            r.get("Billing_Code", ""), r.get("Specialty", ""), r.get("Rate", ""),
+            r.get("Billing_Code", ""), r.get("Specialty", ""), rate,
             r.get("Address_Status", ""), r.get("Address_Source", ""),
             r.get("Taxonomy_Code", ""), r.get("Specialty_Source", ""),
             r.get("Negotiated_Type", ""), r.get("Billing_Class", ""),
             r.get("Address_Candidate_Count", ""),
             r.get("Address_Selection_Status", ""),
             r.get("Address_Selection_Reason", ""),
+            r.get("Specialty_Status", ""), r.get("Geocode_Status", ""),
+            r.get("Latitude", ""), r.get("Longitude", ""),
+            r.get("Nearest_TIN_Site_Distance_Km", ""), r.get("Geo_Score", ""),
+            r.get("Geo_Anomaly_Flag", ""), r.get("TIN_Modal_ZIP3", ""),
+            r.get("TIN_Support_Score", ""), r.get("TIN_Address_Link_Status", ""),
         ])
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{ws.max_row}"
