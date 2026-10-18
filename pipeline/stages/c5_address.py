@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import re
 import time
@@ -18,6 +19,10 @@ try:
     import openpyxl
 except (OSError, KeyError, ValueError, TypeError, ImportError):
     openpyxl = None
+try:
+    import usaddress
+except ImportError:
+    usaddress = None
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -30,7 +35,7 @@ C5_COLUMNS = [
     "Address_Status", "Address_Confidence", "Address_Source", "Address_Source_Count",
     "Address_Score", "Address_Verification_Status",
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
-    "Geocode_Status",
+    "Geocode_Status", "Latitude", "Longitude", "Nearest_TIN_Site_Distance_Km", "Geo_Score", "Geo_Anomaly_Flag",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code",
     "Specialty_Source", "Specialty_Status", "Negotiated_Type", "Billing_Class",
     "Setting", "Service_Code", "Modifiers", "Source_File", "Selection_Rule",
@@ -42,7 +47,8 @@ CANDIDATE_COLUMNS = [
     "Address_Score", "Address_Verification_Status",
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code", "CMS_Specialty",
-    "Alternative_Addresses",
+    "Alternative_Addresses", "Geocode_Status", "Latitude", "Longitude",
+    "Nearest_TIN_Site_Distance_Km", "Geo_Score", "Geo_Anomaly_Flag",
 ]
 
 AUDIT_COLUMNS = [
@@ -121,22 +127,67 @@ def _fuzzy_addr_equal(a: str, b: str) -> bool:
     return ratio >= 0.97
 
 
-def _geocode_status(addr: str) -> str:
-    if os.environ.get("PTD_GEOCODE") != "1":
-        return "disabled"
-    if not addr:
-        return "not_attempted"
+def _is_street_address(addr: str) -> bool:
+    if not addr or _address_role(addr) == "mailing/po_box":
+        return False
+    if usaddress is None:
+        return bool(re.search(r"\b\d+\b", addr))
     try:
-        import urllib.parse
-        import urllib.request
+        parsed, _ = usaddress.tag(addr)
+    except (usaddress.RepeatedLabelError, ValueError):
+        return bool(re.search(r"\b\d+\b", addr))
+    return bool(parsed.get("AddressNumber") and parsed.get("StreetName"))
+
+
+def _geocode_address(addr: str, cache: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Census geocode one physical address; cache avoids repeated HTTP calls."""
+    key = _normalize_address(addr, "", "", "", "")
+    if os.environ.get("PTD_GEOCODE") != "1":
+        return {"status": "disabled", "latitude": None, "longitude": None}
+    if not _is_street_address(addr):
+        return {"status": "not_physical", "latitude": None, "longitude": None}
+    if key in cache:
+        return cache[key]
+    try:
         params = urllib.parse.urlencode({"address": addr, "benchmark": "Public_AR_Current", "format": "json"})
         url = "https://geocoding.geo.census.gov/geocoder/locations/address?" + params
         with urllib.request.urlopen(url, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         matches = data.get("result", {}).get("addressMatches", [])
-        return "matched" if matches else "no_match"
-    except (OSError, ValueError, TimeoutError):
-        return "error"
+        if not matches:
+            result = {"status": "no_match", "latitude": None, "longitude": None}
+        else:
+            point = matches[0].get("coordinates", {})
+            result = {
+                "status": "matched",
+                "latitude": float(point["y"]),
+                "longitude": float(point["x"]),
+            }
+        cache[key] = result
+        return result
+    except (OSError, ValueError, KeyError, TimeoutError):
+        return {"status": "error", "latitude": None, "longitude": None}
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    earth_radius_km = 6371.0088
+    d_lat = math.radians(lat2 - lat1)
+    d_lon = math.radians(lon2 - lon1)
+    a = (math.sin(d_lat / 2) ** 2 + math.cos(math.radians(lat1))
+         * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) ** 2)
+    return 2 * earth_radius_km * math.asin(math.sqrt(a))
+
+
+def _geo_support(distance_km: float | None) -> tuple[int, str]:
+    if distance_km is None:
+        return 0, "not_measured"
+    if distance_km <= 10:
+        return 10, "near_tin_site"
+    if distance_km <= 50:
+        return 5, "regional_tin_site"
+    if distance_km <= 160:
+        return 0, "separate_possible_site"
+    return -10, "distant_tin_site"
 
 
 def _valid_npi(npi: str) -> bool:
@@ -200,7 +251,7 @@ def _address_role(addr: str) -> str:
     return "practice"
 
 
-def score_address_candidate(candidate: dict[str, Any]) -> tuple[int, str]:
+def score_address_candidate(candidate: dict[str, Any], geo_score: int = 0) -> tuple[int, str]:
     """Score physical-practice evidence; not proof that a TIN owns address."""
     sources = candidate.get("sources", set())
     families = candidate.get("families", set())
@@ -219,8 +270,62 @@ def score_address_candidate(candidate: dict[str, Any]) -> tuple[int, str]:
         score += 20
     if _address_role(_text(candidate.get("orig"))) == "mailing/po_box":
         score -= 60
-    score = max(0, min(score, 100))
-    return score, "VERIFIED" if score >= 60 else "PROBABLE" if score >= 30 else "LOW"
+    base_score = max(0, min(score, 100))
+    score = max(0, min(base_score + geo_score, 100))
+    verification = "VERIFIED" if base_score >= 60 else "PROBABLE" if base_score >= 30 else "LOW"
+    return score, verification
+
+
+def _apply_geospatial_support(
+    pair_candidates: dict[tuple[str, str], tuple[dict[str, dict[str, Any]], str]],
+    cache_path: Path,
+) -> dict[str, int | bool]:
+    """Add weak same-TIN geographic support after base evidence is established."""
+    enabled = os.environ.get("PTD_GEOCODE") == "1"
+    try:
+        cache = json.loads(cache_path.read_text()) if cache_path.is_file() else {}
+    except (OSError, ValueError):
+        cache = {}
+    cache_before = len(cache)
+    trusted_by_tin: dict[str, list[tuple[str, float, float]]] = {}
+    candidates = []
+
+    for (npi, tin), (groups, _) in pair_candidates.items():
+        for norm, group in groups.items():
+            geo = _geocode_address(_text(group.get("orig")), cache)
+            group["geo"] = geo
+            group["geo_score"] = 0
+            group["geo_flag"] = "not_measured"
+            candidates.append((npi, tin, norm, group))
+            base_score, _ = score_address_candidate(group)
+            if base_score >= 60 and geo["latitude"] is not None:
+                trusted_by_tin.setdefault(tin, []).append((npi, geo["latitude"], geo["longitude"]))
+
+    for npi, tin, _, group in candidates:
+        geo = group["geo"]
+        if geo["latitude"] is None:
+            continue
+        distances = [
+            _haversine_km(geo["latitude"], geo["longitude"], lat, lon)
+            for peer_npi, lat, lon in trusted_by_tin.get(tin, [])
+            if peer_npi != npi
+        ]
+        distance = min(distances) if distances else None
+        geo_score, geo_flag = _geo_support(distance)
+        group["nearest_tin_site_distance_km"] = distance
+        group["geo_score"] = geo_score
+        group["geo_flag"] = geo_flag
+
+    if enabled:
+        cache_path.write_text(json.dumps(cache, sort_keys=True) + "\n")
+    matches = sum(1 for _, _, _, group in candidates if group["geo"]["status"] == "matched")
+    return {
+        "enabled": enabled,
+        "candidates": len(candidates),
+        "matched": matches,
+        "cache_entries_before": cache_before,
+        "cached_addresses": len(cache),
+    }
 
 
 def _is_complete_address(addr: str) -> bool:
@@ -604,36 +709,36 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         elif status == "UNRESOLVED":
             unresolved += 1
 
+    unverified_tin = len(candidate_keys)
+    geocode_stats = _apply_geospatial_support(pair_candidates, out_dir / "census_geocode_cache.json")
+
+    for (npi, tin), business_name in candidate_keys.items():
+        addr_groups, status = pair_candidates[(npi, tin)]
         candidate_norms = list(addr_groups)
         for norm in candidate_norms or [""]:
             group = addr_groups.get(norm, {})
             sources = group.get("sources", set())
             families = group.get("families", set())
             orig_addr = group.get("orig", "")
-            score, verification = score_address_candidate(group)
+            geo = group.get("geo", {"status": "not_attempted", "latitude": None, "longitude": None})
+            score, verification = score_address_candidate(group, int(group.get("geo_score", 0)))
             tier = "Tier 4" if not norm else "Tier 2" if len(families) >= 2 else "Tier 3" if _is_complete_address(orig_addr) else "Tier 4"
             pwriter.writerow({
-                "NPI": npi,
-                "TIN": tin,
-                "TIN_Business_Name": business_name,
-                "Address": orig_addr,
-                "Normalized_Address": norm,
-                "Address_Status": status,
+                "NPI": npi, "TIN": tin, "TIN_Business_Name": business_name,
+                "Address": orig_addr, "Normalized_Address": norm, "Address_Status": status,
                 "Address_Confidence": "HIGH" if tier == "Tier 2" else "MEDIUM" if tier == "Tier 3" else "NONE" if not norm else "LOW",
                 "Address_Source": ";".join(sorted(sources)) if sources else "NONE",
-                "Address_Source_Count": len(sources),
-                "Address_Score": score,
-                "Address_Verification_Status": verification,
-                "Address_Record_Updated_At": group.get("updated", ""),
-                "Address_Role": _address_role(orig_addr) if norm else "unknown",
-                "Address_Evidence_Tier": tier,
+                "Address_Source_Count": len(sources), "Address_Score": score,
+                "Address_Verification_Status": verification, "Address_Record_Updated_At": group.get("updated", ""),
+                "Address_Role": _address_role(orig_addr) if norm else "unknown", "Address_Evidence_Tier": tier,
                 "Match_Method": "exact_npi_tin" if _valid_npi(npi) else "invalid_npi",
-                "TIN_Address_Link_Status": "UNVERIFIED",
-                "Taxonomy_Code": group.get("taxonomy", ""),
+                "TIN_Address_Link_Status": "UNVERIFIED", "Taxonomy_Code": group.get("taxonomy", ""),
                 "CMS_Specialty": group.get("cms_specialty", ""),
                 "Alternative_Addresses": "; ".join(other for other in candidate_norms if other != norm),
+                "Geocode_Status": geo["status"], "Latitude": geo["latitude"], "Longitude": geo["longitude"],
+                "Nearest_TIN_Site_Distance_Km": group.get("nearest_tin_site_distance_km"),
+                "Geo_Score": group.get("geo_score", 0), "Geo_Anomaly_Flag": group.get("geo_flag", "not_measured"),
             })
-    unverified_tin = len(candidate_keys)
 
     for idx, c4r in enumerate(c4_rows):
         npi = _text(c4r.get("npi") or c4r.get("NPI"))
@@ -678,6 +783,10 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 source_count = 0
                 score = 0
                 verification = "NONE"
+                geo = {"status": "not_attempted", "latitude": None, "longitude": None}
+                geo_score = 0
+                geo_flag = "not_measured"
+                nearest_tin_site_distance_km = None
             else:
                 g = addr_groups[norm]
                 orig_addr = g["orig"]
@@ -695,7 +804,11 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 confidence = "HIGH" if tier == "Tier 2" else "MEDIUM" if tier == "Tier 3" else "LOW"
                 role = _address_role(orig_addr)
                 source_count = len(sources)
-                score, verification = score_address_candidate(g)
+                geo = g.get("geo", {"status": "not_attempted", "latitude": None, "longitude": None})
+                geo_score = int(g.get("geo_score", 0))
+                geo_flag = g.get("geo_flag", "not_measured")
+                nearest_tin_site_distance_km = g.get("nearest_tin_site_distance_km")
+                score, verification = score_address_candidate(g, geo_score)
 
             # specialty
             nucc_spec = _nucc_specialty(tax_code, nucc)
@@ -767,7 +880,12 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Address_Record_Updated_At": updated,
                 "Address_Role": role,
                 "Address_Evidence_Tier": tier,
-                "Geocode_Status": _geocode_status(orig_addr if norm != "" else ""),
+                "Geocode_Status": geo["status"],
+                "Latitude": geo["latitude"],
+                "Longitude": geo["longitude"],
+                "Nearest_TIN_Site_Distance_Km": nearest_tin_site_distance_km,
+                "Geo_Score": geo_score,
+                "Geo_Anomaly_Flag": geo_flag,
                 "Match_Method": "exact_npi" if _valid_npi(npi) else "invalid_npi",
                 "Confidence_or_Evidence_Level": "HIGH" if addr_status == "CORROBORATED" else "MEDIUM" if addr_status == "SINGLE_SOURCE" else "LOW" if addr_status == "CONFLICTING" else "NONE",
                 "TIN_Address_Link_Status": tin_link,
@@ -852,6 +970,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         "nucc_file": "nucc_taxonomy_261.csv",
         "nucc_mapped_codes": len(nucc),
         "api_status": npd_stats,
+        "geocoding": geocode_stats,
         "sources": ["NPPES", "NPPES_PL", "CMS_DAC", "CMS_NPD_LOCATION"],
     }
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
