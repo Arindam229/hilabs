@@ -24,7 +24,7 @@ from pipeline.config import Config
 from pipeline.io.manifest import write_manifest
 from pipeline.stages.c1_index import PLAN_COLUMNS, StageResult, _write_parquet
 
-NETWORK_COLUMNS = PLAN_COLUMNS + ("network_type", "reason_code", "confidence", "confidence_score")
+NETWORK_COLUMNS = PLAN_COLUMNS + ("network_type", "reason_code", "confidence", "confidence_score", "nlp_score")
 RATE_FILE_COLUMNS = (
     "rate_file_url",
     "associated_ppo_plan_count",
@@ -73,11 +73,13 @@ def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[s
     """Classify plan only; rate membership needs C2 in-file evidence."""
     classified = dict(row)
     plan_name = classified.get("plan_name", "")
+    nlp_score = _semantic_ppo_score(plan_name) if (use_embeddings and _HAS_ST) else None
     if classified.get("market_type", "").lower() != "group":
         return classified | {
             "network_type": "OUT_OF_SCOPE",
             "reason_code": "R-C2-01-NON_GROUP_MARKET",
             "confidence": "high",
+            "nlp_score": nlp_score,
             "confidence_score": 1.0,
         }
     if not _is_california(classified):
@@ -85,6 +87,7 @@ def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[s
             "network_type": "OUT_OF_SCOPE",
             "reason_code": "R-C2-02-NON_CA_SCOPE",
             "confidence": "high",
+            "nlp_score": nlp_score,
             "confidence_score": 1.0,
         }
     for network_type, pattern in _RESTRICTIVE_NETWORKS:
@@ -93,12 +96,14 @@ def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[s
                 "network_type": network_type,
                 "reason_code": "R-C2-03-RESTRICTIVE_TOKEN",
                 "confidence": "high",
+            "nlp_score": nlp_score,
             }
     if _EOA.search(plan_name):
         return classified | {
             "network_type": "UNRESOLVED",
             "reason_code": "R-C2-05-EOA_UNVERIFIED",
             "confidence": "low",
+            "nlp_score": nlp_score,
             "confidence_score": 0.0,
         }
     if _PPO.search(plan_name):
@@ -106,6 +111,7 @@ def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[s
             "network_type": "PPO",
             "reason_code": "R-C2-04-PPO_TOKEN",
             "confidence": "medium",
+            "nlp_score": nlp_score,
             "confidence_score": 0.5,
         }
     if use_embeddings and _HAS_ST:
@@ -117,11 +123,13 @@ def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[s
                 "reason_code": "R-C2-08-NLP_FALLBACK",
                 "confidence": confidence,
                 "confidence_score": round(score, 6),
+                "nlp_score": score,
             }
     return classified | {
         "network_type": "UNRESOLVED",
         "reason_code": "R-C2-06-INSUFFICIENT_PLAN_EVIDENCE",
         "confidence": "low",
+            "nlp_score": nlp_score,
     }
 
 
