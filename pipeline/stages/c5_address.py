@@ -8,6 +8,8 @@ import json
 import os
 import re
 import time
+import urllib.parse
+import urllib.request
 import zipfile
 from difflib import SequenceMatcher
 
@@ -202,6 +204,8 @@ def score_address_candidate(candidate: dict[str, Any]) -> tuple[int, str]:
     sources = candidate.get("sources", set())
     families = candidate.get("families", set())
     score = 0
+    if "CMS_NPD_LOCATION" in sources:
+        score += 60
     if "CMS_DAC" in sources:
         score += 50
     if "PTD_ADDRESS" in sources:
@@ -399,6 +403,81 @@ def _build_cms(outer_zip_path: Path, npi_set: set[str], primary_tax: dict[str, s
     return result
 
 
+def _npd_location_records(bundle: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract California active-location records from a CMS NPD FHIR bundle."""
+    records = []
+    for entry in bundle.get("entry", []):
+        resource = entry.get("resource", {})
+        if resource.get("resourceType") != "Location" or resource.get("status") == "inactive":
+            continue
+        address = resource.get("address", {})
+        if _text(address.get("state")).upper() != "CA":
+            continue
+        lines = address.get("line", [])
+        if not isinstance(lines, list):
+            lines = [lines]
+        line1, line2 = (lines + ["", ""])[:2]
+        orig = _orig_address(line1, line2, address.get("city"), address.get("state"), address.get("postalCode"))
+        norm = _normalize_address(line1, line2, address.get("city"), address.get("state"), address.get("postalCode"))
+        if norm:
+            records.append({
+                "source": "CMS_NPD_LOCATION", "orig": orig, "norm": norm,
+                "taxonomy": "", "updated": _text(resource.get("meta", {}).get("lastUpdated")),
+                "cms_specialty": "",
+            })
+    return records
+
+
+def _npd_get(path: str, params: dict[str, str]) -> dict[str, Any]:
+    base = os.environ.get("PTD_NPD_BASE_URL", "https://directory.cms.gov/fhir").rstrip("/")
+    url = f"{base}/{path.lstrip('/')}?{urllib.parse.urlencode(params)}"
+    request = urllib.request.Request(url, headers={"Accept": "application/fhir+json"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _build_cms_npd(npi_set: set[str], cache_dir: Path, max_npis: int) -> tuple[dict[str, list[dict[str, str]]], dict[str, int]]:
+    """Fetch current CMS NPD locations once per NPI, with resumable raw-response cache."""
+    result: dict[str, list[dict[str, str]]] = {npi: [] for npi in npi_set}
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    stats = {"requested": 0, "cache_hits": 0, "api_success": 0, "api_errors": 0, "location_records": 0}
+    npis = sorted(npi_set)
+    if max_npis > 0:
+        npis = npis[:max_npis]
+    for npi in npis:
+        cache_path = cache_dir / f"{npi}.json"
+        payload: dict[str, Any]
+        if cache_path.is_file():
+            try:
+                payload = json.loads(cache_path.read_text(encoding="utf-8"))
+                stats["cache_hits"] += 1
+            except (OSError, ValueError):
+                payload = {}
+        else:
+            stats["requested"] += 1
+            try:
+                practitioner = _npd_get("Practitioner", {
+                    "identifier": f"http://hl7.org/fhir/sid/us-npi|{npi}", "_count": "1",
+                })
+                entries = practitioner.get("entry", [])
+                practitioner_id = _text(entries[0].get("resource", {}).get("id")) if entries else ""
+                roles = _npd_get("PractitionerRole", {
+                    "practitioner": f"Practitioner/{practitioner_id}", "active": "true",
+                    "_include": "PractitionerRole:location", "_count": "100",
+                }) if practitioner_id else {}
+                payload = {"practitioner": practitioner, "roles": roles}
+                cache_path.write_text(json.dumps(payload), encoding="utf-8")
+                stats["api_success"] += 1
+                time.sleep(0.05)
+            except (OSError, ValueError, TimeoutError):
+                payload = {}
+                stats["api_errors"] += 1
+        records = _npd_location_records(payload.get("roles", {}))
+        result[npi] = records
+        stats["location_records"] += len(records)
+    return result, stats
+
+
 def _nucc_specialty(code: str, nucc: dict[str, dict[str, str]]) -> str:
     if not code:
         return ""
@@ -440,6 +519,15 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     # outer zip path
     nppes_map, primary_tax = _build_nppes(outer_zip, npi_set)
     cms_map = _build_cms(outer_zip, npi_set, primary_tax)
+    npd_map: dict[str, list[dict[str, str]]] = {npi: [] for npi in npi_set}
+    npd_stats: dict[str, Any] = {"enabled": False}
+    if os.environ.get("PTD_NPD_API") == "1":
+        try:
+            max_npis = int(os.environ.get("PTD_NPD_MAX_NPIS", "100"))
+        except ValueError:
+            max_npis = 100
+        npd_map, npd_stats = _build_cms_npd(npi_set, out_dir / "cms_npd_cache", max_npis)
+        npd_stats["enabled"] = True
 
     # outputs
     c5_path = out_dir / "c5result.csv"
@@ -479,7 +567,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     pair_candidates: dict[tuple[str, str], tuple[dict[str, dict[str, Any]], str]] = {}
     for (npi, tin), business_name in candidate_keys.items():
         nppes_addrs = nppes_map.get(npi, []) if _valid_npi(npi) else []
-        cms_addrs = cms_map.get(npi, []) if _valid_npi(npi) else []
+        cms_addrs = (cms_map.get(npi, []) + npd_map.get(npi, [])) if _valid_npi(npi) else []
         addr_groups, status = _resolve_address_candidates(npi, nppes_addrs, cms_addrs)
         pair_candidates[(npi, tin)] = (addr_groups, status)
         if status == "CORROBORATED":
@@ -738,8 +826,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         "cms_file": "DAC_NationalDownloadableFile.csv",
         "nucc_file": "nucc_taxonomy_261.csv",
         "nucc_mapped_codes": len(nucc),
-        "api_status": "unavailable (network blocked / no NPI search param)",
-        "sources": ["NPPES", "NPPES_PL", "CMS_DAC"],
+        "api_status": npd_stats,
+        "sources": ["NPPES", "NPPES_PL", "CMS_DAC", "CMS_NPD_LOCATION"],
     }
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 

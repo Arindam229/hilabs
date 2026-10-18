@@ -186,6 +186,13 @@ Template:
 - **Alternatives rejected:** Selecting by billing code, which carries price/specialty information but no address evidence; claiming a score proves TIN ownership of address.
 - **Confidence / risk:** Medium. CMS DAC supports active provider-location evidence; C4 supports NPI-to-TIN. Neither source alone proves exact TIN-to-street ownership.
 
+### R-C5-03 — CMS National Provider Directory is opt-in, cached location evidence
+- **Rule:** When `PTD_NPD_API=1`, C5 queries CMS FHIR `Practitioner` by NPI, then active `PractitionerRole` records with included `Location` resources. California physical locations score `+60`. Raw responses cache per NPI and `PTD_NPD_MAX_NPIS` defaults to `100`; `0` requests all NPIs.
+- **Why:** Current directory locations can strengthen stale NPPES/DAC evidence, but thousands of public API calls must be resumable and deliberate.
+- **Evidence:** `tests/test_c5_candidate_keys.py` parses CMS FHIR Location address data. One live API check returned a valid FHIR response and location references.
+- **Alternatives rejected:** Calling public API once per C4 rate row; treating NPD provider data as proof of TIN-to-street ownership.
+- **Confidence / risk:** Medium. NPD coverage depends on directory participation; absent response means `no directory listing`, not `no practice`.
+
 ### R-C3-02 — Full streaming grade by default; bounded sampled diagnosis only when explicit
 - **Rule:** C3 scans every `in_network` item by default. `PTD_C3_SAMPLE_EVERY=N` retains one deterministic block of `PTD_C3_BLOCK_SIZE` items for every `N` blocks only when requested. C4 rejects sampled C3 output. C3 writes at most `PTD_C3_ROW_FLAG_LIMIT` exception examples while retaining exact exception counts.
 - **Why:** Sampling lowers diagnostic cost on extreme files but must never silently drive final rate selection or reported file quality.

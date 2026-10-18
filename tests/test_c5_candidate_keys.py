@@ -1,4 +1,5 @@
 from pipeline.stages.c5_address import (
+    _npd_location_records,
     _resolve_address_candidates,
     c4_candidate_keys,
     score_address_candidate,
@@ -64,6 +65,16 @@ def test_c5_penalizes_po_box_even_when_cms_lists_it():
     assert score_address_candidate(po_box) == (0, "LOW")
 
 
+def test_c5_treats_current_cms_directory_location_as_verified():
+    directory_location = {
+        "orig": "100 Main Street, Los Angeles, CA 90001",
+        "sources": {"CMS_NPD_LOCATION"},
+        "families": {"CMS_NPD_LOCATION"},
+    }
+
+    assert score_address_candidate(directory_location) == (60, "VERIFIED")
+
+
 def test_c6_selects_highest_scored_address_before_source_tier():
     selected, status, _, alternatives = _select_canonical([
         {
@@ -85,3 +96,31 @@ def test_c6_selects_highest_scored_address_before_source_tier():
     assert selected["Address"].startswith("10 Main")
     assert status == "CANONICAL_SELECTED"
     assert alternatives == ["20 Second Avenue, Los Angeles, CA 90002"]
+
+
+def test_c5_extracts_active_cms_directory_location_address():
+    bundle = {
+        "entry": [{
+            "resource": {
+                "resourceType": "Location",
+                "id": "active-clinic",
+                "status": "active",
+                "address": {
+                    "line": ["100 Main Street", "Suite 4"],
+                    "city": "Los Angeles",
+                    "state": "CA",
+                    "postalCode": "90001-1234",
+                },
+                "meta": {"lastUpdated": "2026-10-17T12:00:00Z"},
+            }
+        }]
+    }
+
+    assert _npd_location_records(bundle) == [{
+        "source": "CMS_NPD_LOCATION",
+        "orig": "100 Main Street, Suite 4, Los Angeles, CA 90001-1234",
+        "norm": "100 MAIN ST STE 4 LOS ANGELES CA 90001",
+        "taxonomy": "",
+        "updated": "2026-10-17T12:00:00Z",
+        "cms_specialty": "",
+    }]

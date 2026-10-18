@@ -170,6 +170,16 @@ addresses to C4 providers, enriches specialties, and writes `c5result.csv`,
 `c5_address_audit.csv`, and `c5_summary.json`. C6 selects one canonical address
 per `(NPI, TIN, Billing Code)` and writes `data/out/final_provider_rates.xlsx`.
 
+Use current CMS National Provider Directory locations for a bounded, resumable
+address-evidence pass. Responses are cached under `data/stage/c5/cms_npd_cache/`:
+
+```bash
+PTD_NPD_API=1 PTD_NPD_MAX_NPIS=100 make c5
+```
+
+Set `PTD_NPD_MAX_NPIS=0` only for all NPIs. NPD requests remain opt-in; this
+avoids an uncontrolled public-API run during normal reproducible pipeline runs.
+
 ## Repository layout
 
 ```text
