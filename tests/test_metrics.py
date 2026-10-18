@@ -1,6 +1,7 @@
 import io
 import zipfile
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -88,7 +89,7 @@ def test_pointer_hygiene_detects_orphans_and_ghosts():
 
 
 class TestEmMonotonicity:
-    LADDERS = {"established_patient": ["99213", "99214", "99215"]}
+    LADDERS: ClassVar[dict[str, list[str]]] = {"established_patient": ["99213", "99214", "99215"]}
 
     def test_no_violation_when_rates_increase_with_complexity(self):
         rows = [_row(code="99213", rate=100), _row(code="99214", rate=150), _row(code="99215", rate=200)]
