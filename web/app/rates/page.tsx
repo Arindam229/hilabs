@@ -533,7 +533,7 @@ export default function RatesPage() {
                       <ChevronLeft className="h-4 w-4" />
                     </Button>
                     <span className="text-sm text-muted-foreground">
-                      Page {(table as any).getState()?.pagination?.pageIndex + 1} of {table.getPageCount()}
+                      Page {pagination.pageIndex + 1} of {table.getPageCount()}
                     </span>
                     <Button
                       variant="outline"
