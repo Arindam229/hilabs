@@ -56,24 +56,31 @@ Centene index files ─► C1 parse ─► C2 PPO network ─► C3 grade files 
 ### Plots for insights
 
 **C2: how 3,274 Centene plans narrow to 453 CA commercial-group PPO plans (every bar is a rule ID)**
+
 ![C2 plan classification](docs/assets/c2_classification.png)
 
-**C2: why rules decide. NLP embedding scores never reach 0.5 (max 0.418), so a 0.8 threshold would miss every PPO plan**
+**C2: why rules decide. NLP embedding scores max out at 0.418, so no plan ever reaches the 0.8 threshold**
+
 ![C2 NLP score distribution](docs/assets/c2_nlp_score_distribution.png)
 
 **C3: file-quality scorecard for the Health Net CA file (92.9, A); code coverage is the one weak dimension**
+
 ![C3 quality metrics](docs/assets/c3_quality_metrics.png)
 
 **C4: from 1,717 services to 21,853 curated rates (log scale)**
+
 ![C4 extraction funnel](docs/assets/c4_extraction_funnel.png)
 
 **C5: the heuristic address-scoring weights; no single non-CMS source reaches VERIFIED alone**
+
 ![C5 scoring weights](docs/assets/c5_scoring_weights.png)
 
 **C6: what verifies each final row; payer and claims evidence lifts verification from 4.8 % to 25.0 % (strong) / 57.1 % (total)**
+
 ![C6 verification by source](docs/assets/c6_verification_by_source.png)
 
 **C7: providers by price-vs-peers × breadth quadrant**
+
 ![C7 quadrants](docs/assets/c7_quadrants.png)
 
 ---
