@@ -82,7 +82,7 @@ export function DashboardLayout({
         />
 
         {/* Page Content */}
-        <main className="p-4 lg:p-6" onClick={closeMobileMenu}>
+        <main className="p-4 lg:p-6 pb-24 lg:pb-32" onClick={closeMobileMenu}>
           {children}
         </main>
       </div>

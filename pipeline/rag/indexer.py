@@ -7,15 +7,21 @@ from typing import Any
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-from sentence_transformers import SentenceTransformer
 
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
-_model: SentenceTransformer | None = None
+_model: Any = None
 
 
-def get_embedder() -> SentenceTransformer:
+def get_embedder() -> Any:
     global _model
     if _model is None:
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as err:
+            raise RuntimeError(
+                "sentence_transformers is not installed. RAG semantic search requires sentence-transformers. "
+                "The core pipeline (c1-c7) does not require this package."
+            ) from err
         _model = SentenceTransformer(EMBEDDING_MODEL_NAME)
     return _model
 

@@ -37,7 +37,7 @@ def main() -> None:
 
         result = run_c4(cfg, rate_file=args.rate_file, output_dir=args.output_dir, rate_member=args.rate_member)
         print(f"{result.stage}: {result.counts}")
-    if args.stage == "c5hn":  # Health Net evidence from the responses archived in the dataset (no API)
+    if args.stage in {"c5hn", "all"}:  # Health Net evidence from the responses archived in the dataset (no API)
         from pipeline.stages.c5_healthnet import run_c5_healthnet
 
         print(f"c5hn: {run_c5_healthnet(cfg, offline=True, verbose=False)}")
@@ -63,7 +63,7 @@ def main() -> None:
 
         result = run_c7(cfg)
         print(f"{result.stage}: {result.counts}")
-    if args.stage in {"rag", "all"}:
+    if args.stage == "rag":
         from pipeline.rag.indexer import build_or_load_index
 
         print("Syncing RAG index with latest pipeline data...")

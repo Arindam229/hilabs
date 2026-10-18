@@ -309,21 +309,21 @@ export function PipelineCopilot() {
   return (
     <>
       {/* Floating Action Button */}
-      <div className="fixed bottom-6 right-6 z-50">
+      <div className="fixed bottom-20 lg:bottom-6 right-4 sm:right-6 z-40">
         {!isOpen && (
           <motion.div
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
           >
             <Button
               onClick={() => setIsOpen(true)}
-              className="h-12 px-5 py-2.5 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-2xl flex items-center gap-2.5 font-bold text-sm ring-4 ring-primary/20 transition-all cursor-pointer"
+              className="h-11 sm:h-12 px-4 sm:px-5 py-2.5 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-2xl flex items-center gap-2 sm:gap-2.5 font-bold text-xs sm:text-sm ring-4 ring-primary/20 transition-all cursor-pointer"
             >
-              <Sparkles className="h-4 w-4 text-amber-300 animate-pulse" />
+              <Sparkles className="h-4 w-4 text-amber-300 animate-pulse flex-shrink-0" />
               <span>Ask Pipeline Copilot</span>
-              <Badge className="bg-white/20 text-white text-[10px] px-1.5 py-0 font-mono ml-1">
+              <Badge className="bg-white/20 text-white text-[10px] px-1.5 py-0 font-mono ml-0.5 sm:ml-1">
                 Qwen 2.5
               </Badge>
             </Button>

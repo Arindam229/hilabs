@@ -241,6 +241,7 @@ GEMINI.md
 node_modules/
 .next/
 web/.next/
+*.tsbuildinfo
 
 # Codex
 .codex/
