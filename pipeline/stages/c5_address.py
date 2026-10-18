@@ -25,6 +25,7 @@ from pipeline.io.manifest import write_manifest
 C5_COLUMNS = [
     "NPI", "TIN", "Address", "Billing_Code", "Specialty", "Rate",
     "Address_Status", "Address_Confidence", "Address_Source", "Address_Source_Count",
+    "Address_Score", "Address_Verification_Status",
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
     "Geocode_Status",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code",
@@ -35,6 +36,7 @@ C5_COLUMNS = [
 CANDIDATE_COLUMNS = [
     "NPI", "TIN", "TIN_Business_Name", "Address", "Normalized_Address",
     "Address_Status", "Address_Confidence", "Address_Source", "Address_Source_Count",
+    "Address_Score", "Address_Verification_Status",
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code", "CMS_Specialty",
     "Alternative_Addresses",
@@ -193,6 +195,27 @@ def _address_role(addr: str) -> str:
     if "PO BOX" in u or "P.O. BOX" in u or "P O BOX" in u:
         return "mailing/po_box"
     return "practice"
+
+
+def score_address_candidate(candidate: dict[str, Any]) -> tuple[int, str]:
+    """Score physical-practice evidence; not proof that a TIN owns address."""
+    sources = candidate.get("sources", set())
+    families = candidate.get("families", set())
+    score = 0
+    if "CMS_DAC" in sources:
+        score += 50
+    if "PTD_ADDRESS" in sources:
+        score += 40
+    if "NPPES_PL" in sources:
+        score += 30
+    if "NPPES" in sources:
+        score += 10
+    if len(families) >= 2:
+        score += 20
+    if _address_role(_text(candidate.get("orig"))) == "mailing/po_box":
+        score -= 60
+    score = max(0, min(score, 100))
+    return score, "VERIFIED" if score >= 60 else "PROBABLE" if score >= 30 else "LOW"
 
 
 def _is_complete_address(addr: str) -> bool:
@@ -474,6 +497,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
             sources = group.get("sources", set())
             families = group.get("families", set())
             orig_addr = group.get("orig", "")
+            score, verification = score_address_candidate(group)
             tier = "Tier 4" if not norm else "Tier 2" if len(families) >= 2 else "Tier 3" if _is_complete_address(orig_addr) else "Tier 4"
             pwriter.writerow({
                 "NPI": npi,
@@ -485,6 +509,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Address_Confidence": "HIGH" if tier == "Tier 2" else "MEDIUM" if tier == "Tier 3" else "NONE" if not norm else "LOW",
                 "Address_Source": ";".join(sorted(sources)) if sources else "NONE",
                 "Address_Source_Count": len(sources),
+                "Address_Score": score,
+                "Address_Verification_Status": verification,
                 "Address_Record_Updated_At": group.get("updated", ""),
                 "Address_Role": _address_role(orig_addr) if norm else "unknown",
                 "Address_Evidence_Tier": tier,
@@ -537,6 +563,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 confidence = "NONE"
                 role = "unknown"
                 source_count = 0
+                score = 0
+                verification = "NONE"
             else:
                 g = addr_groups[norm]
                 orig_addr = g["orig"]
@@ -554,6 +582,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 confidence = "HIGH" if tier == "Tier 2" else "MEDIUM" if tier == "Tier 3" else "LOW"
                 role = _address_role(orig_addr)
                 source_count = len(sources)
+                score, verification = score_address_candidate(g)
 
             # specialty
             nucc_spec = _nucc_specialty(tax_code, nucc)
@@ -620,6 +649,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Address_Confidence": confidence,
                 "Address_Source": source_str if source_str else ("NONE" if status in ("UNRESOLVED", "INVALID_NPI") else ""),
                 "Address_Source_Count": source_count,
+                "Address_Score": score,
+                "Address_Verification_Status": verification,
                 "Address_Record_Updated_At": updated,
                 "Address_Role": role,
                 "Address_Evidence_Tier": tier,

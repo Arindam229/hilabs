@@ -49,6 +49,10 @@ def _select_canonical(group_rows: list[dict[str, str]]) -> tuple[dict[str, str],
 
     # rank
     def rank_key(r):
+        try:
+            score = float(r.get("Address_Score", "0") or 0)
+        except ValueError:
+            score = 0.0
         tier = r.get("Address_Evidence_Tier", "")
         tr = TIER_RANK.get(tier, 9)
         st = r.get("Address_Status", "")
@@ -56,7 +60,7 @@ def _select_canonical(group_rows: list[dict[str, str]]) -> tuple[dict[str, str],
         sc = _source_count(r.get("Address_Source", ""))
         upd = r.get("Address_Record_Updated_At", "") or r.get("Source_Updated_At", "") or ""
         norm = _normalize_address(r.get("Address", ""), "", "", "", "")
-        return (tr, sr, -sc, 0 if upd else 1, norm)
+        return (-score, tr, sr, -sc, 0 if upd else 1, norm)
 
     sorted_cands = sorted(distinct, key=rank_key)
     top = sorted_cands[0]
@@ -64,7 +68,7 @@ def _select_canonical(group_rows: list[dict[str, str]]) -> tuple[dict[str, str],
     top_key = rank_key(top)
     tied = [r for r in sorted_cands if rank_key(r) == top_key]
     st = top.get("Address_Status", "")
-    if len(distinct) > 1 and st in ("CONFLICTING", "UNRESOLVED"):
+    if len(distinct) > 1 and st in ("CONFLICTING", "UNRESOLVED") and len(tied) > 1:
         status = "AMBIGUOUS_SINGLE_ADDRESS_SELECTED"
         reason = "conflicting/ambiguous addresses; selected best available (lexicographically smallest) fallback"
     elif len(tied) > 1:
@@ -72,12 +76,10 @@ def _select_canonical(group_rows: list[dict[str, str]]) -> tuple[dict[str, str],
         reason = "tie among top candidates; selected lexicographically smallest address"
     else:
         status = "CANONICAL_SELECTED"
-        if st == "CORROBORATED":
-            reason = "highest source corroboration"
-        elif st == "SINGLE_SOURCE":
+        if st == "SINGLE_SOURCE":
             reason = "only available source"
         else:
-            reason = "best available evidence"
+            reason = "highest address evidence score"
     alt_list = [r.get("Address", "") for r in sorted_cands[1:]]
     return top, status, reason, alt_list
 

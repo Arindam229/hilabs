@@ -1,4 +1,9 @@
-from pipeline.stages.c5_address import _resolve_address_candidates, c4_candidate_keys
+from pipeline.stages.c5_address import (
+    _resolve_address_candidates,
+    c4_candidate_keys,
+    score_address_candidate,
+)
+from pipeline.stages.c6_final import _select_canonical
 
 
 def test_c5_candidate_key_is_npi_and_tin_not_billing_code():
@@ -31,3 +36,52 @@ def test_c5_corroborates_one_address_once_per_candidate_key():
     assert status == "CORROBORATED"
     assert len(candidates) == 1
     assert candidates["10 MAIN ST LOS ANGELES CA 90001"]["sources"] == {"NPPES", "CMS_DAC"}
+
+
+def test_c5_scores_corroborated_practice_address_above_secondary_candidate():
+    corroborated = {
+        "orig": "10 Main Street, Los Angeles, CA 90001",
+        "sources": {"NPPES", "CMS_DAC"},
+        "families": {"NPPES", "CMS_DAC"},
+    }
+    secondary = {
+        "orig": "20 Second Avenue, Los Angeles, CA 90002",
+        "sources": {"NPPES_PL"},
+        "families": {"NPPES"},
+    }
+
+    assert score_address_candidate(corroborated) == (80, "VERIFIED")
+    assert score_address_candidate(secondary) == (30, "PROBABLE")
+
+
+def test_c5_penalizes_po_box_even_when_cms_lists_it():
+    po_box = {
+        "orig": "P.O. Box 123, Los Angeles, CA 90001",
+        "sources": {"CMS_DAC"},
+        "families": {"CMS_DAC"},
+    }
+
+    assert score_address_candidate(po_box) == (0, "LOW")
+
+
+def test_c6_selects_highest_scored_address_before_source_tier():
+    selected, status, _, alternatives = _select_canonical([
+        {
+            "Address": "20 Second Avenue, Los Angeles, CA 90002",
+            "Address_Score": "30",
+            "Address_Evidence_Tier": "Tier 2",
+            "Address_Status": "CONFLICTING",
+            "Address_Source": "NPPES_PL",
+        },
+        {
+            "Address": "10 Main Street, Los Angeles, CA 90001",
+            "Address_Score": "80",
+            "Address_Evidence_Tier": "Tier 3",
+            "Address_Status": "CONFLICTING",
+            "Address_Source": "NPPES;CMS_DAC",
+        },
+    ])
+
+    assert selected["Address"].startswith("10 Main")
+    assert status == "CANONICAL_SELECTED"
+    assert alternatives == ["20 Second Avenue, Los Angeles, CA 90002"]

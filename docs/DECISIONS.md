@@ -179,6 +179,13 @@ Template:
 - **Alternatives rejected:** Resolving candidates at `(NPI, TIN, billing_code)` grain or joining source address data directly on TIN, which NPPES and CMS DAC do not expose.
 - **Confidence / risk:** High for pipeline grain. TIN-to-address remains `UNVERIFIED` until group or directory evidence is added; PTD proves only NPI-to-TIN.
 
+### R-C5-02 — Score practice-address evidence before C6 selection
+- **Rule:** C5 scores candidate addresses: CMS DAC `+50`, payer PTD physical address `+40` when present, NPPES secondary location `+30`, NPPES primary location `+10`, independent-source corroboration `+20`, and P.O. Box `-60`. Scores ≥60 are `VERIFIED`, 30–59 `PROBABLE`, lower scores `LOW`. C6 selects highest score for each `(NPI, TIN, billing code)` only after C5 candidate generation.
+- **Why:** NPPES primary location alone is stale-prone; source corroboration should beat source ordering or lexicographic fallback.
+- **Evidence:** `tests/test_c5_candidate_keys.py` proves corroborated address (`80`) beats NPPES secondary-only address (`30`) and that P.O. Boxes are penalized.
+- **Alternatives rejected:** Selecting by billing code, which carries price/specialty information but no address evidence; claiming a score proves TIN ownership of address.
+- **Confidence / risk:** Medium. CMS DAC supports active provider-location evidence; C4 supports NPI-to-TIN. Neither source alone proves exact TIN-to-street ownership.
+
 ### R-C3-02 — Full streaming grade by default; bounded sampled diagnosis only when explicit
 - **Rule:** C3 scans every `in_network` item by default. `PTD_C3_SAMPLE_EVERY=N` retains one deterministic block of `PTD_C3_BLOCK_SIZE` items for every `N` blocks only when requested. C4 rejects sampled C3 output. C3 writes at most `PTD_C3_ROW_FLAG_LIMIT` exception examples while retaining exact exception counts.
 - **Why:** Sampling lowers diagnostic cost on extreme files but must never silently drive final rate selection or reported file quality.
