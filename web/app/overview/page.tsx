@@ -49,11 +49,10 @@ export default function OverviewPage() {
     async function fetchData() {
       try {
         setLoading(true);
-        const [r1, r2] = await Promise.all([fetch("/api/data"), fetch("/api/c2")]);
-        if (!r1.ok) throw new Error("Failed to fetch data");
-        const json = await r1.json();
+        const response = await fetch("/api/data");
+        if (!response.ok) throw new Error("Failed to fetch data");
+        const json = await response.json();
         setData(json);
-        if (r2.ok) setC2(await r2.json());
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load data");
       } finally {
@@ -61,6 +60,10 @@ export default function OverviewPage() {
       }
     }
     fetchData();
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/c2").then((r) => r.ok ? r.json() : null).then((j) => { if (j) setC2(j); }).catch(() => {});
   }, []);
 
   if (loading) {
