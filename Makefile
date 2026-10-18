@@ -22,10 +22,10 @@ c1:
 c2:
 	uv run python -m pipeline c2
 
-c3: c2
+c3:
 	uv run python -m pipeline c3
 
-c4: c3
+c4:
 	uv run python -m pipeline c4 --output-dir "$(PTD_C4_OUTPUT_DIR)"
 
 $(C4_SELECTED):
