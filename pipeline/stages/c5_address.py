@@ -206,7 +206,7 @@ def _census_query_params(addr: str) -> dict[str, str]:
 def _geocode_address(addr: str, cache: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Census geocode one physical address; cache avoids repeated HTTP calls."""
     key = _normalize_address(addr, "", "", "", "")
-    if os.environ.get("PTD_GEOCODE") != "1":
+    if os.environ.get("PTD_GEOCODE", "1") != "1":  # on by default; PTD_GEOCODE=0 disables
         return {"status": "disabled", "latitude": None, "longitude": None}
     if not _is_street_address(addr):
         return {"status": "not_physical", "latitude": None, "longitude": None}
@@ -459,7 +459,7 @@ def _apply_geospatial_support(
     cache_path: Path,
 ) -> dict[str, int | bool]:
     """Add weak same-TIN geographic support after base evidence is established."""
-    enabled = os.environ.get("PTD_GEOCODE") == "1"
+    enabled = os.environ.get("PTD_GEOCODE", "1") == "1"
     try:
         cache = json.loads(cache_path.read_text()) if cache_path.is_file() else {}
     except (OSError, ValueError):
@@ -476,7 +476,7 @@ def _apply_geospatial_support(
     geocodes: dict[str, dict[str, Any]] = {}
     if enabled:
         try:
-            workers = max(1, min(16, int(os.environ.get("PTD_GEOCODE_WORKERS", "8"))))
+            workers = max(1, int(os.environ.get("PTD_GEOCODE_WORKERS", "8")))
         except ValueError:
             workers = 8
         pending = {
@@ -983,11 +983,11 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         pecos_stats["file"] = src
     npd_map: dict[str, list[dict[str, str]]] = {npi: [] for npi in npi_set}
     npd_stats: dict[str, Any] = {"enabled": False}
-    if os.environ.get("PTD_NPD_API") == "1":
+    if os.environ.get("PTD_NPD_API", "1") == "1":  # on by default; PTD_NPD_API=0 disables
         try:
-            max_npis = int(os.environ.get("PTD_NPD_MAX_NPIS", "100"))
+            max_npis = int(os.environ.get("PTD_NPD_MAX_NPIS", "0"))  # 0 = every uncached NPI
         except ValueError:
-            max_npis = 100
+            max_npis = 0
         try:
             npd_workers = int(os.environ.get("PTD_NPD_WORKERS", "4"))
         except ValueError:

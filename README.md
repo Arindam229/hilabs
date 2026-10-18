@@ -139,7 +139,7 @@ make setup                                   # uv sync
 # Put the dataset archive at data/hilabs_dataset_2026-10-17.zip
 # (or: export PTD_DATA_DIR=/folder/containing/the/zip)
 
-PTD_NPD_API=1 make pipeline                  # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7
+make pipeline                                # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7 (every source on)
 make test                                    # ruff + pytest
 ```
 
@@ -150,7 +150,7 @@ make c1 && make c2          # index parsing, PPO network      → data/out/c2_pp
 make c3                     # file quality grades             → docs/deliverables/file_quality_metrics.md
 make c4                     # rate extraction                 → data/stage/c4/selected_rates.csv
 make c5hn                   # Health Net evidence, replayed offline from the archive (no API, no key)
-PTD_NPD_API=1 make c5       # address engine                  → data/stage/c5/c5result.csv
+make c5                     # address engine                  → data/stage/c5/c5result.csv
 make c6                     # final rate file                 → data/out/final_provider_rates.xlsx
 make c7                     # cost-effectiveness              → data/out/c7_cost_effectiveness.xlsx
 ```
@@ -158,12 +158,14 @@ make c7                     # cost-effectiveness              → data/out/c7_co
 | Environment variable | Effect |
 |---|---|
 | `PTD_DATA_DIR` | Folder that contains the dataset archive (default `data/`) |
-| `PTD_NPD_API=1` | Use the CMS National Provider Directory FHIR API in C5. Responses are cached (`PTD_NPD_MAX_NPIS`, `PTD_NPD_WORKERS`) |
+| `PTD_NPD_API` | CMS National Provider Directory lookups in C5. **On by default**, for every NPI (`PTD_NPD_MAX_NPIS=0`). Responses are cached per NPI. `PTD_NPD_API=0` disables it; `PTD_NPD_WORKERS` (default 4) sets concurrency |
+| `PTD_GEOCODE` | Census geocoding of candidate addresses in C5. **On by default**, cached. `PTD_GEOCODE=0` disables it; `PTD_GEOCODE_WORKERS` (default 8) sets concurrency |
 | `PTD_AS_OF` | Fixed reference date for freshness and expiry scoring, so reruns are reproducible |
 | `PTD_C3_WORKERS`, `PTD_C3_SAMPLE_EVERY` | C3 parallelism and explicit diagnostic sampling (C4 rejects sampled grades) |
+| `PTD_C3_ROW_FLAG_LIMIT`, `PTD_C3_MAX_OUTLIER_COHORTS` | Optional caps on C3 exception examples and outlier cohorts. **Default 0 = no cap** |
 | `PTD_REVALIDATION_ZIP`, `PTD_MEDICARE_PROVIDER_ZIP`, `PTD_PECOS_ENROLLMENT_ZIP` | Use a standalone file in place of the copy inside the archive |
 
-**Live Health Net refresh (optional).** `make c5hn` replays the responses archived in the dataset, so a clean clone reproduces the 2026-10-18 result offline. To refresh from the live directory, run `uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5`. It is rate-limited and caches every response.
+**Live Health Net refresh (optional).** `make c5hn` replays the responses archived in the dataset, so a clean clone reproduces the 2026-10-18 result offline. To refresh from the live directory, run `uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5`. There are no hard caps on `--workers` or `--rps`, and every result page is fetched. The defaults stay polite because a live API that is hammered starts refusing requests. Every response is cached.
 
 ---
 
@@ -374,7 +376,7 @@ cd web && npm install && npm run dev          # Next.js dashboard (overview, rat
 - **Every rule has an ID and evidence.** Recorded in `docs/DECISIONS.md` with the rule, the reason, the evidence query or result, the alternatives rejected and the risk.
 - **Honest outputs.** Unknown is `None`, not 0 or 100. Absence of evidence is never scored as good, and every fallback is counted in the output.
 - **Reproducible.** One archive, config-driven paths, manifests with config hash and git SHA, `PTD_AS_OF` for date-dependent metrics, and an offline replay of the live directory evidence.
-- **Polite external calls.** Rate-limited (≤ 5 req/s globally), retried with backoff, cached, and resumable. The Health Net web key is read at runtime and never written to disk.
+- **Polite external calls, no hard caps.** Every source is on by default with no NPI or page limits. Live APIs default to a polite global rate (overridable), are retried with backoff, and are cached and resumable. The Health Net web key is read at runtime and never written to disk.
 
 ---
 
