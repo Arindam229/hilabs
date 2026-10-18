@@ -4,6 +4,15 @@ from __future__ import annotations
 
 import re
 import time
+
+try:
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+    _HAS_ST = True
+except (ImportError, OSError):
+    _HAS_ST = False
+    SentenceTransformer = None
+    np = None
 from collections import Counter, defaultdict
 from collections.abc import Mapping
 from pathlib import Path
@@ -39,7 +48,28 @@ def _is_california(row: Mapping[str, str]) -> bool:
     return bool(re.search(r"\d{5}CA\d", plan_id)) or plan_name.startswith(("CA ", "CALCHOICE")) or "_ca_" in url
 
 
-def classify_plan(row: Mapping[str, str]) -> dict[str, str]:
+
+
+_PPO_ARCHETYPE = "Open network preferred provider organization with out of network benefits"
+_ST_MODEL = None
+
+
+def _semantic_ppo_score(plan_name: str) -> float | None:
+    global _ST_MODEL
+    if not _HAS_ST:
+        return None
+    try:
+        if _ST_MODEL is None:
+            _ST_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+        from sentence_transformers import util
+
+        emb = _ST_MODEL.encode([plan_name, _PPO_ARCHETYPE], convert_to_tensor=True, normalize_embeddings=True)
+        return float(util.cos_sim(emb[0], emb[1]).item())
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def classify_plan(row: Mapping[str, str], use_embeddings: bool = False) -> dict[str, str]:
     """Classify plan only; rate membership needs C2 in-file evidence."""
     classified = dict(row)
     plan_name = classified.get("plan_name", "")
@@ -74,6 +104,14 @@ def classify_plan(row: Mapping[str, str]) -> dict[str, str]:
             "reason_code": "R-C2-04-PPO_TOKEN",
             "confidence": "medium",
         }
+    if use_embeddings and _HAS_ST:
+        score = _semantic_ppo_score(plan_name)
+        if score is not None and score >= 0.80:
+            return classified | {
+                "network_type": "PPO",
+                "reason_code": "R-C2-08-NLP_FALLBACK",
+                "confidence": "low",
+            }
     return classified | {
         "network_type": "UNRESOLVED",
         "reason_code": "R-C2-06-INSUFFICIENT_PLAN_EVIDENCE",
