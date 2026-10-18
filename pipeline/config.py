@@ -19,6 +19,12 @@ class Config:
     c2_evidence_members: tuple[str, ...]
     rate_file: Path | None = None
     revalidation_zip: Path | None = None
+    medicare_provider_zip: Path | None = None
+    pecos_enrollment_zip: Path | None = None
+    # members inside `archive` (matched by path suffix); the *_zip paths above override them when set
+    revalidation_member: str = "cms/Revalidation Reassignment List.zip"
+    medicare_provider_member: str = "cms/Medicare Physician & Other Practitioners - by Provider.zip"
+    pecos_enrollment_member: str = "cms/Medicare Fee-For-Service Public Provider Enrollment.zip"
 
     def stage_dir(self, stage: str) -> Path:
         return self.data_dir / "stage" / stage
@@ -49,6 +55,14 @@ def load_config(path: Path | None = None) -> Config:
         revalidation_zip = Path(revalidation_raw).expanduser()
         if not revalidation_zip.is_absolute():
             revalidation_zip = data_dir / revalidation_zip
+
+    def optional_path(env: str, key: str) -> Path | None:
+        raw = os.environ.get(env) or source.get(key)
+        if not raw:
+            return None
+        p = Path(raw).expanduser()
+        return p if p.is_absolute() else data_dir / p
+
     return Config(
         root=root,
         data_dir=data_dir,
@@ -57,4 +71,8 @@ def load_config(path: Path | None = None) -> Config:
         c2_evidence_members=tuple(source.get("c2_evidence_members", [])),
         rate_file=rate_file,
         revalidation_zip=revalidation_zip,
+        medicare_provider_zip=optional_path("PTD_MEDICARE_PROVIDER_ZIP", "medicare_provider_zip"),
+        pecos_enrollment_zip=optional_path("PTD_PECOS_ENROLLMENT_ZIP", "pecos_enrollment_zip"),
+        **{k: source[k] for k in ("revalidation_member", "medicare_provider_member", "pecos_enrollment_member")
+           if source.get(k)},
     )

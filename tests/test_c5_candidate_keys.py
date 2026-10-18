@@ -57,6 +57,24 @@ def test_c5_corroborates_one_address_once_per_candidate_key():
     assert candidates["10 MAIN ST LOS ANGELES CA 90001"]["sources"] == {"NPPES", "CMS_DAC"}
 
 
+def test_c5_excludes_non_california_address_candidates():
+    nppes = [{
+        "source": "NPPES", "orig": "10 Main Street, Green Bay, WI 54311",
+        "norm": "10 MAIN ST GREEN BAY WI 54311", "state": "WI",
+        "taxonomy": "207Q00000X", "updated": "NPPES", "cms_specialty": "",
+    }]
+    cms = [{
+        "source": "CMS_DAC", "orig": "20 Main Street, Los Angeles, CA 90001",
+        "norm": "20 MAIN ST LOS ANGELES CA 90001", "state": "CA",
+        "taxonomy": "", "updated": "CMS", "cms_specialty": "Family Medicine",
+    }]
+
+    candidates, status = _resolve_address_candidates("1234567890", nppes, cms)
+
+    assert status == "SINGLE_SOURCE"
+    assert list(candidates) == ["20 MAIN ST LOS ANGELES CA 90001"]
+
+
 def test_c5_scores_corroborated_practice_address_above_secondary_candidate():
     corroborated = {
         "orig": "10 Main Street, Los Angeles, CA 90001",
@@ -368,7 +386,9 @@ def test_c6_exports_reassignment_evidence_columns(tmp_path):
         "Address": "23451 MADISON ST, TORRANCE, CA 90505",
         "Billing_Code": "99213", "Specialty": "Gastroenterology", "Rate": "120.00",
         "Address_Status": "CORROBORATED", "Address_Source": "CMS_DAC;NPPES",
-        "Address_Score": "100", "Address_Evidence_Tier": "Tier 2",
+        "Address_Confidence": "HIGH", "Address_Source_Count": "2",
+        "Address_Score": "100", "Address_Verification_Status": "VERIFIED",
+        "Address_Evidence_Tier": "Tier 2",
         "Reassignment_Status": "EXACT_NPI_GROUP_PAC_NAME",
         "Group_PAC_ID": "1234567890",
         "Reassignment_Group_Name": "Digestive Care Consultants",
@@ -392,7 +412,50 @@ def test_c6_exports_reassignment_evidence_columns(tmp_path):
     values = list(sheet.iter_rows(values_only=True))
     headers = values[0]
     exported = dict(zip(headers, values[1]))
+    assert exported["Address_Confidence"] == "HIGH"
+    assert exported["Address_Source_Count"] == 2
+    assert exported["Address_Score"] == 100
+    assert exported["Address_Verification_Status"] == "VERIFIED"
+    assert exported["Address_Evidence_Tier"] == "Tier 2"
     assert exported["Reassignment_Status"] == "EXACT_NPI_GROUP_PAC_NAME"
     assert exported["Group_PAC_ID"] == "1234567890"
     assert exported["Reassignment_Group_Name"] == "Digestive Care Consultants"
     assert exported["Reassignment_Name_Match"] == "yes"
+
+
+def test_c6_exports_only_california_addresses(tmp_path):
+    c5_path = tmp_path / "c5result.csv"
+    rows = [
+        {
+            "NPI": "1174512172", "TIN": "33-0308231",
+            "Address": "23451 MADISON ST, TORRANCE, CA 90505",
+            "Billing_Code": "99213", "Specialty": "Gastroenterology", "Rate": "120.00",
+            "Address_Status": "SINGLE_SOURCE", "Address_Source": "NPPES",
+            "Address_Score": "10", "Address_Evidence_Tier": "Tier 3",
+        },
+        {
+            "NPI": "1174512172", "TIN": "33-0308231",
+            "Address": "100 MAIN ST, GREEN BAY, WI 54311",
+            "Billing_Code": "99214", "Specialty": "Gastroenterology", "Rate": "140.00",
+            "Address_Status": "SINGLE_SOURCE", "Address_Source": "NPPES",
+            "Address_Score": "10", "Address_Evidence_Tier": "Tier 3",
+        },
+    ]
+    with c5_path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    cfg = Config(
+        root=tmp_path, data_dir=tmp_path, archive=tmp_path / "source.zip",
+        index_members=(), c2_evidence_members=(),
+    )
+    (tmp_path / "config.yaml").write_text("sources: {}\n")
+    output = tmp_path / "provider_rates.xlsx"
+
+    run_c6(cfg, c5_path=c5_path, output_path=output)
+
+    sheet = openpyxl.load_workbook(output, read_only=True)["Curated Rates"]
+    values = list(sheet.iter_rows(values_only=True))
+    exported = [dict(zip(values[0], row)) for row in values[1:]]
+    assert [row["Billing Code"] for row in exported] == ["99213"]
+    assert all(", CA " in row["Address"] for row in exported)

@@ -175,7 +175,7 @@ evidence. Put `Revalidation Reassignment List.zip` in `data/`, or point to it
 without copying:
 
 ```bash
-PTD_REVALIDATION_ZIP="$HOME/Downloads/Revalidation Reassignment List.zip" make c5
+make c5   # reassignment list is read from cms/ inside the dataset archive
 ```
 
 C5 streams its CP1252 CSV directly from ZIP. It joins reassignment to CMS DAC on

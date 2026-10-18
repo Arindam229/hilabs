@@ -1,10 +1,17 @@
 data_dir: data
 sources:
+  # One archive holds every input. Members are found by path suffix, so the archive's root folder
+  # name does not matter. Contents + sha256: <root>/MANIFEST*.txt inside the archive.
   archive: hilabs_dataset_2026-10-17.zip
-  revalidation_zip: Revalidation Reassignment List.zip
   index_members:
     - centene/index/*.json
   c2_evidence_members: []
+  # CMS sources shipped as nested zips inside the archive (downloaded manually from data.cms.gov,
+  # which blocks scripted access from this network). Override with a standalone file via
+  # PTD_REVALIDATION_ZIP / PTD_MEDICARE_PROVIDER_ZIP / PTD_PECOS_ENROLLMENT_ZIP.
+  revalidation_member: cms/Revalidation Reassignment List.zip
+  medicare_provider_member: cms/Medicare Physician & Other Practitioners - by Provider.zip
+  pecos_enrollment_member: cms/Medicare Fee-For-Service Public Provider Enrollment.zip
 scope:
   payer: Centene
   state: CA

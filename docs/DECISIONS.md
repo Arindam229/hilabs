@@ -206,3 +206,21 @@ Template:
 - **Evidence:** Real 2026-10 file streamed 3,634,486 rows; matched 314 rows, 207 C4 NPIs and 250 Group PAC IDs. C5 summary reports 6 strongly supported `(NPI,TIN)` keys. Candidate output contains 130 exact-PAC and 7 exact-PAC-plus-name address candidates after address normalization.
 - **Alternatives rejected:** NPI-only reassignment join, fuzzy organization-name matching, and treating Group PAC ID as TIN. Each can falsely attach an address to wrong billing organization.
 - **Confidence / risk:** High for exact reassignment/DAC pair; medium for TIN association because business-name record linkage is not numeric TIN proof. Coverage is Medicare-limited.
+
+### R-C5-11 — Payer/claims evidence matches candidates at building level
+- **Rule:** Health Net and Medicare records join an existing C5 candidate when the normalized address is equal (fuzzy ≥0.97) or the same street + city + ZIP5 with a different/missing suite. ZIP+4 is cut to ZIP5 at the end of the address only (fix: an unanchored regex hit 5-digit street numbers first, leaving 9-digit ZIPs).
+- **Why:** Payer directories and claims files omit or reformat suites; strict matching scored real agreements as "new address".
+- **Evidence:** `tests/test_c5_external.py`. Re-scoring the Health Net run moved 338 NPIs from "new address" to "match".
+- **Risk:** Same building ≠ same suite; reported as address agreement, not suite proof.
+
+### R-C5-12 — External address evidence: Health Net PPO directory, Medicare claims 2024, PECOS flag
+- **Rule:** New C5 sources (`pipeline/stages/c5_external.py`): `HEALTHNET_PPO_SHOWN` +50 (shown on the public site per its own `eligibleForDisplay` filter), `HEALTHNET_PPO_HIDDEN` +20 (current PPO contract hidden from the site; reason kept in `HN_Hidden_Reason`; attach-only, never creates a candidate, never earns the multi-family bonus), `MEDICARE_CLAIMS_2024` +40. Any one of them alone stays below VERIFIED; with NPPES, shown/claims reach VERIFIED and hidden reaches PROBABLE. New candidates inherit the NPI's taxonomy. PECOS Q3 2026 adds `PECOS_Enrollment` = CA / OTHER_STATE_ONLY / NOT_ENROLLED (no street address, flag only).
+- **Why:** NPPES alone verified 4.8% of C6 rows; payer + claims evidence is independent of NPPES.
+- **Evidence (2026-10-18, offline re-score of the C6 file):** ≥2 sources agree on 6,504 of 11,396 rows (57.1%); 2,807 (24.6%) without hidden listings.
+- **Alternatives rejected:** hidden listings creating candidates (11.4k extra, 4.7× C5 rows); Medicare 2024 as sole basis for VERIFIED (2 years old).
+- **Risk:** Health Net hidden-reason meanings are our reading of its labels (not published).
+
+### R-C5-HN-01..07 — Health Net PPO directory stage (`c5hn`)
+- **Rule:** Search the Find-a-Provider PCES API by name, server-filtered to networks 8201 (HealthNet Commercial PPO) and 8203 (Commercial PS3, small-group EnhancedCare PPO); accept a record only on exact NPI. Name chain: legal name → minus LLC/INC → NPPES DBA → rate-file business name; individuals "First M Last" → "First Last". Person-corporations (e.g. "SANG H BAIK M.D., INC") link to the doctor's record only when name **and** address match. Page size shrinks 100→25→10 on 413/400. Excluded: Ambetter (individual exchange), Medicare/WellCare PPOs, dental PPOs.
+- **Evidence:** 2026-10-18 run: 3,734 NPIs, 0 errors, 78.2% in the target PPO; fallback names recovered 724 NPIs. Raw responses archived in the dataset; `python -m pipeline c5hn` replays them offline (as of 2026-10-18).
+- **Risk:** Directory absence ≠ out of network (Health Net omits some facilities).
