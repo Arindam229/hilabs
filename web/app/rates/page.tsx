@@ -305,14 +305,12 @@ export default function RatesPage() {
 
               {/* Column Filters Dropdown */}
               <DropdownMenu>
-                <DropdownMenuTrigger>
-                  <Button variant="outline" className="h-9 gap-2">
-                    <Filter className="h-4 w-4" />
-                    <span>Filters</span>
-                    {hasActiveFilters && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                    )}
-                  </Button>
+                <DropdownMenuTrigger className="inline-flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground">
+                  <Filter className="h-4 w-4" />
+                  <span>Filters</span>
+                  {hasActiveFilters && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                  )}
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-80 p-2">
                   <DropdownMenuLabel>Column Filters</DropdownMenuLabel>
