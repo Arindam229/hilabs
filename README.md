@@ -206,3 +206,45 @@ Selection key and hierarchy are implementation decisions, not a complete algorit
 - `selected_rates.csv` — one selected rate per valid NPI + TIN + billing-code key.
 - `rate_selection_audit.csv` — alternatives, duplicates, selected rates and reasons.
 - `c4_summary.json` — counts of extracted records, selected rates, invalid identifiers, duplicates and unresolved cases.
+
+## Logic: PPO network identification (C1–C2)
+
+- C1 parses Centene index files and deduplicates plan-to-rate-file mappings.
+- C2 classifies plans as PPO using explicit plan-name tokens (`PPO`, `CUSPPO`,
+  `Preferred Provider`) only for California commercial-group plans.
+- Restrictive tokens (`HMO`, `EPO`, `POS`, `WholeCare`, `SmartCare`,
+  `CommunityCare`, `Salud`) override PPO tokens.
+- Non-group and non-CA plans are `OUT_OF_SCOPE`; ambiguous plans (e.g. `EOA`)
+  remain `UNRESOLVED` rather than guessed.
+- Health Net CA and OR share separate files; CA commercial group uses one shared
+  in-network file, so plan names alone cannot prove rate-level membership.
+
+## Logic: TIN to NPI to address mapping (C5)
+
+Sources used:
+- NPPES (primary + secondary practice locations, taxonomy codes)
+- CMS Doctors & Clinicians national file (practice address, specialty)
+- NUCC taxonomy (taxonomy code -> specialty)
+- HiLabs Spec-Proc weights (billing code -> specialty fallback)
+- Centene provider directory API (unavailable/blocked in this environment)
+
+Rules:
+- NPI is the primary join key; TIN and org name are supplementary only.
+- Practice addresses are preferred over mailing addresses.
+- Multiple addresses per NPI are preserved as distinct candidates.
+- TIN-address links are never assumed; all are marked `UNVERIFIED`.
+- Address statuses: `CORROBORATED`, `SINGLE_SOURCE`, `CONFLICTING`, `UNRESOLVED`,
+  `INVALID_NPI`.
+- Address normalization trims, removes punctuation, standardizes ZIP and street
+  suffixes; fuzzy matching (>=97%) merges only near-identical addresses.
+- Materially different addresses are never merged on city/ZIP/org alone.
+
+Conflicts:
+- When NPPES and CMS disagree, both addresses are retained as `CONFLICTING`
+  candidates rather than one being silently dropped.
+- C6 selects one canonical address per `(NPI, TIN, Billing Code)` using an
+  evidence tier (corroboration > single source > conflicting), source count,
+  record freshness, and a deterministic lexicographic tie-breaker.
+- Ambiguous selections are marked `AMBIGUOUS_SINGLE_ADDRESS_SELECTED` and all
+  alternatives are preserved in the audit.
+- No address is invented; unresolved rows keep a blank `Address`.
