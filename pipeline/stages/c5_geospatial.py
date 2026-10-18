@@ -53,19 +53,18 @@ def enrich_c5_directory(stage_dir: Path) -> dict[str, int]:
                 print(f"C5 geo: {index}/{len(pending)} addresses", flush=True)
     cache_path.write_text(json.dumps(cache, sort_keys=True) + "\n")
 
-    # Weak TIN support from independently strong addresses.
+    # Weak TIN support from geocoded physical addresses. This is clustering evidence,
+    # not proof that TIN legally owns site.
     trusted = {}
     zip_counts = {}
     address_npis = {}
+    tin_npis = {}
     for row in candidates:
-        try:
-            strong = float(row.get("Address_Score", "0") or 0) >= 60
-        except ValueError:
-            strong = False
-        if not strong:
+        if row.get("Address_Role") == "mailing/po_box" or row.get("Geocode_Status") != "matched":
             continue
         tin = row.get("TIN", "")
         npi = row.get("NPI", "")
+        tin_npis.setdefault(tin, set()).add(npi)
         norm = row.get("Normalized_Address", "")
         zip3 = norm.split()[-1][:3] if norm.split() and norm.split()[-1].isdigit() else ""
         if zip3:
@@ -98,7 +97,7 @@ def enrich_c5_directory(stage_dir: Path) -> dict[str, int]:
         tin = row.get("TIN", "")
         npi_count = len(address_npis.get((tin, norm), set()))
         zip3 = norm.split()[-1][:3] if norm.split() and norm.split()[-1].isdigit() else ""
-        tin_score = (10 if zip3 and zip3 == modal.get(tin, "") else 0) + (15 if npi_count >= 2 else 0)
+        tin_score = (10 if len(tin_npis.get(tin, set())) >= 2 and zip3 and zip3 == modal.get(tin, "") else 0) + (15 if npi_count >= 2 else 0)
         tin_score = min(20, tin_score)
         row.update({
             "Geocode_Status": geo.get("status", "no_match"),
