@@ -63,7 +63,7 @@ export default function OverviewPage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/c2").then((r) => r.ok ? r.json() : null).then((j) => { if (j) setC2(j); }).catch(() => {});
+    fetch("/api/c2").then((r) => r.ok ? r.json() : null).then((j) => { if (j) { console.log("C2", j); setC2(j); } }).catch((e) => console.error("C2 fetch", e));
   }, []);
 
   if (loading) {
