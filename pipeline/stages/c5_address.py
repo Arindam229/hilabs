@@ -32,6 +32,14 @@ C5_COLUMNS = [
     "Setting", "Service_Code", "Modifiers", "Source_File", "Selection_Rule",
 ]
 
+CANDIDATE_COLUMNS = [
+    "NPI", "TIN", "TIN_Business_Name", "Address", "Normalized_Address",
+    "Address_Status", "Address_Confidence", "Address_Source", "Address_Source_Count",
+    "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
+    "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code", "CMS_Specialty",
+    "Alternative_Addresses",
+]
+
 AUDIT_COLUMNS = [
     "C4_Row_Id", "NPI", "TIN", "Billing_Code", "Original_Address",
     "Normalized_Address", "Source", "Source_Record_Id", "Source_Updated_At",
@@ -128,6 +136,56 @@ def _geocode_status(addr: str) -> str:
 
 def _valid_npi(npi: str) -> bool:
     return len(npi) == 10 and npi.isdigit()
+
+
+def c4_candidate_keys(c4_rows: list[dict[str, str]]) -> dict[tuple[str, str], str]:
+    """Return one C5 address-candidate key per C4 NPI/TIN relationship."""
+    keys: dict[tuple[str, str], str] = {}
+    for row in c4_rows:
+        npi = _text(row.get("npi") or row.get("NPI"))
+        tin = _text(row.get("tin") or row.get("TIN"))
+        if npi and tin:
+            keys.setdefault((npi, tin), _text(row.get("business_name") or row.get("TIN_Business_Name")))
+    return keys
+
+
+def _resolve_address_candidates(
+    npi: str,
+    nppes_addrs: list[dict[str, Any]],
+    cms_addrs: list[dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], str]:
+    """Resolve source records to candidate addresses for one NPI/TIN key."""
+    addr_groups: dict[str, dict[str, Any]] = {}
+    for rec in nppes_addrs + cms_addrs:
+        norm = rec["norm"]
+        if not norm:
+            continue
+        matched_key = next((existing for existing in addr_groups if _fuzzy_addr_equal(norm, existing)), None)
+        if matched_key is None:
+            addr_groups[norm] = {
+                "orig": rec["orig"], "sources": set(), "families": set(),
+                "taxonomy": rec.get("taxonomy", ""),
+                "cms_specialty": rec.get("cms_specialty", ""), "updated": rec.get("updated", ""),
+            }
+            matched_key = norm
+        elif not addr_groups[matched_key]["orig"]:
+            addr_groups[matched_key]["orig"] = rec["orig"]
+        addr_groups[matched_key]["sources"].add(rec["source"])
+        addr_groups[matched_key]["families"].add("NPPES" if rec["source"].startswith("NPPES") else rec["source"])
+        if rec.get("taxonomy") and not addr_groups[matched_key]["taxonomy"]:
+            addr_groups[matched_key]["taxonomy"] = rec["taxonomy"]
+        if rec.get("cms_specialty") and not addr_groups[matched_key]["cms_specialty"]:
+            addr_groups[matched_key]["cms_specialty"] = rec["cms_specialty"]
+
+    if not _valid_npi(npi):
+        return addr_groups, "INVALID_NPI"
+    if not addr_groups:
+        return addr_groups, "UNRESOLVED"
+    if len(addr_groups) == 1 and len(next(iter(addr_groups.values()))["sources"]) >= 2:
+        return addr_groups, "CORROBORATED"
+    if len(addr_groups) == 1:
+        return addr_groups, "SINGLE_SOURCE"
+    return addr_groups, "CONFLICTING"
 
 
 def _address_role(addr: str) -> str:
@@ -348,11 +406,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     with c4_path.open(newline="", encoding="utf-8") as f:
         c4_rows = list(csv.DictReader(f))
 
-    npi_set = set()
-    for r in c4_rows:
-        npi = _text(r.get("npi"))
-        if _valid_npi(npi):
-            npi_set.add(npi)
+    candidate_keys = c4_candidate_keys(c4_rows)
+    npi_set = {npi for npi, _ in candidate_keys if _valid_npi(npi)}
 
     outer_zip = cfg.archive if str(cfg.archive).endswith(".zip") else None
     if outer_zip is None:
@@ -365,15 +420,19 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
 
     # outputs
     c5_path = out_dir / "c5result.csv"
+    candidate_path = out_dir / "c5_address_candidates.csv"
     audit_path = out_dir / "c5_address_audit.csv"
     summary_path = out_dir / "c5_summary.json"
     manifest_path = out_dir / "_manifest.json"
 
     cf = c5_path.open("w", newline="", encoding="utf-8")
+    pf = candidate_path.open("w", newline="", encoding="utf-8")
     af = audit_path.open("w", newline="", encoding="utf-8")
     cwriter = csv.DictWriter(cf, fieldnames=C5_COLUMNS, extrasaction="ignore")
+    pwriter = csv.DictWriter(pf, fieldnames=CANDIDATE_COLUMNS, extrasaction="ignore")
     awriter = csv.DictWriter(af, fieldnames=AUDIT_COLUMNS, extrasaction="ignore")
     cwriter.writeheader()
+    pwriter.writeheader()
     awriter.writeheader()
 
     row_count = 0
@@ -391,6 +450,51 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     specialty_mapped = 0
     specialty_unmapped = 0
     audit_rows = 0
+
+    # C5 resolves addresses once at NPI/TIN grain. Billing codes belong to C4
+    # rate rows and are attached only after this candidate bridge is built.
+    pair_candidates: dict[tuple[str, str], tuple[dict[str, dict[str, Any]], str]] = {}
+    for (npi, tin), business_name in candidate_keys.items():
+        nppes_addrs = nppes_map.get(npi, []) if _valid_npi(npi) else []
+        cms_addrs = cms_map.get(npi, []) if _valid_npi(npi) else []
+        addr_groups, status = _resolve_address_candidates(npi, nppes_addrs, cms_addrs)
+        pair_candidates[(npi, tin)] = (addr_groups, status)
+        if status == "CORROBORATED":
+            corroborated += 1
+        elif status == "SINGLE_SOURCE":
+            single += 1
+        elif status == "CONFLICTING":
+            conflicting += 1
+        elif status == "UNRESOLVED":
+            unresolved += 1
+
+        candidate_norms = list(addr_groups)
+        for norm in candidate_norms or [""]:
+            group = addr_groups.get(norm, {})
+            sources = group.get("sources", set())
+            families = group.get("families", set())
+            orig_addr = group.get("orig", "")
+            tier = "Tier 4" if not norm else "Tier 2" if len(families) >= 2 else "Tier 3" if _is_complete_address(orig_addr) else "Tier 4"
+            pwriter.writerow({
+                "NPI": npi,
+                "TIN": tin,
+                "TIN_Business_Name": business_name,
+                "Address": orig_addr,
+                "Normalized_Address": norm,
+                "Address_Status": status,
+                "Address_Confidence": "HIGH" if tier == "Tier 2" else "MEDIUM" if tier == "Tier 3" else "NONE" if not norm else "LOW",
+                "Address_Source": ";".join(sorted(sources)) if sources else "NONE",
+                "Address_Source_Count": len(sources),
+                "Address_Record_Updated_At": group.get("updated", ""),
+                "Address_Role": _address_role(orig_addr) if norm else "unknown",
+                "Address_Evidence_Tier": tier,
+                "Match_Method": "exact_npi_tin" if _valid_npi(npi) else "invalid_npi",
+                "TIN_Address_Link_Status": "UNVERIFIED",
+                "Taxonomy_Code": group.get("taxonomy", ""),
+                "CMS_Specialty": group.get("cms_specialty", ""),
+                "Alternative_Addresses": "; ".join(other for other in candidate_norms if other != norm),
+            })
+    unverified_tin = len(candidate_keys)
 
     for idx, c4r in enumerate(c4_rows):
         npi = _text(c4r.get("npi") or c4r.get("NPI"))
@@ -411,59 +515,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         else:
             invalid_npi_count += 1
 
-        # gather addresses
-        nppes_addrs = nppes_map.get(npi, []) if _valid_npi(npi) else []
-        cms_addrs = cms_map.get(npi, []) if _valid_npi(npi) else []
-
-        # build candidate address list with source tracking
-        # group by normalized address
-        addr_groups: dict[str, dict[str, Any]] = {}
-        for rec in nppes_addrs + cms_addrs:
-            norm = rec["norm"]
-            if not norm:
-                continue
-            matched_key = None
-            for existing in addr_groups:
-                if _fuzzy_addr_equal(norm, existing):
-                    matched_key = existing
-                    break
-            if matched_key is None:
-                addr_groups[norm] = {"orig": rec["orig"], "sources": set(), "families": set(),
-                                     "taxonomy": rec.get("taxonomy", ""),
-                                     "cms_specialty": rec.get("cms_specialty", ""), "updated": rec.get("updated", "")}
-                target = norm
-            else:
-                target = matched_key
-                if not addr_groups[target]["orig"]:
-                    addr_groups[target]["orig"] = rec["orig"]
-            addr_groups[target]["sources"].add(rec["source"])
-            if rec["source"].startswith("NPPES"):
-                addr_groups[target]["families"].add("NPPES")
-            else:
-                addr_groups[target]["families"].add(rec["source"])
-            if rec.get("taxonomy") and not addr_groups[target]["taxonomy"]:
-                addr_groups[target]["taxonomy"] = rec["taxonomy"]
-            if rec.get("cms_specialty") and not addr_groups[target]["cms_specialty"]:
-                addr_groups[target]["cms_specialty"] = rec["cms_specialty"]
-
-        # Determine distinct normalized addresses
-        distinct_norms = list(addr_groups.keys())
-
-        # status
-        if not _valid_npi(npi):
-            status = "INVALID_NPI"
-        elif not distinct_norms:
-            status = "UNRESOLVED"
-            unresolved += 1
-        elif len(distinct_norms) == 1 and len(addr_groups[distinct_norms[0]]["sources"]) >= 2:
-            status = "CORROBORATED"
-            corroborated += 1
-        elif len(distinct_norms) == 1:
-            status = "SINGLE_SOURCE"
-            single += 1
-        else:
-            status = "CONFLICTING"
-            conflicting += 1
+        addr_groups, status = pair_candidates.get((npi, tin), ({}, "INVALID_NPI"))
+        distinct_norms = list(addr_groups)
 
         has_conflict = len(distinct_norms) > 1
 
@@ -589,19 +642,6 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
             row_count += 1
             if status not in ("UNRESOLVED", "INVALID_NPI"):
                 addr_matched += 1
-            if addr_status == "CORROBORATED":
-                corroborated += 1
-            elif addr_status == "SINGLE_SOURCE":
-                single += 1
-            elif addr_status == "CONFLICTING":
-                conflicting += 1
-            else:
-                if addr_status == "UNRESOLVED":
-                    unresolved += 1
-                if addr_status == "INVALID_NPI":
-                    pass
-            unverified_tin += 1
-
             # audit row
             audit_row = {
                 "C4_Row_Id": idx,
@@ -642,12 +682,14 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     # (already counted in loop)
 
     cf.close()
+    pf.close()
     af.close()
 
     # summary
     summary = {
         "stage": "c5",
         "input_c4_rows": len(c4_rows),
+        "candidate_keys_npi_tin": len(candidate_keys),
         "distinct_valid_npis": len(distinct_npi),
         "distinct_tins": len(distinct_tin),
         "output_rows": row_count,
@@ -677,6 +719,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         sources=[{"path": str(c4_path)}, {"path": str(outer_zip)}],
         counts={
             "input_c4_rows": len(c4_rows),
+            "candidate_keys_npi_tin": len(candidate_keys),
             "output_rows": row_count,
             "distinct_valid_npis": len(distinct_npi),
             "address_matched_rows": addr_matched,
@@ -686,8 +729,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         started_at=started_at,
     )
 
-    print(f"C5: input_rows={len(c4_rows)} output_rows={row_count} npis={len(distinct_npi)}")
+    print(f"C5: input_rows={len(c4_rows)} candidate_keys={len(candidate_keys)} output_rows={row_count} npis={len(distinct_npi)}")
     print(f"C5: corroborated={corroborated} single={single} conflicting={conflicting} unresolved={unresolved}")
-    print(f"C5: outputs={c5_path}, {audit_path}, {summary_path}")
+    print(f"C5: outputs={candidate_path}, {c5_path}, {audit_path}, {summary_path}")
 
-    return StageResult("c5", summary, (c5_path, audit_path, summary_path, manifest_path))
+    return StageResult("c5", summary, (candidate_path, c5_path, audit_path, summary_path, manifest_path))

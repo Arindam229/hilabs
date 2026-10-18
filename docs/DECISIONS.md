@@ -171,3 +171,10 @@ Template:
 - **Evidence:** `pytest tests/test_c2_c3_c4_connection.py -q` creates C1/C2 source archive, grades queued file, then extracts same source.
 - **Alternatives rejected:** Hardcoded Health Net member in C4; it bypasses C2 and can silently extract out-of-scope data.
 - **Confidence / risk:** High for one-file California Health Net scope. Multiple candidate files require explicit C4 input until per-file fan-out is added.
+
+### R-C5-01 — Resolve addresses at `(NPI, TIN)` grain
+- **Rule:** C5 first creates one candidate-address bridge row per `(NPI, TIN, address)` from C4's provider relationships. Billing codes and rates attach after address candidates are resolved.
+- **Why:** A billing code does not determine a practice location. Resolving candidates per billing code repeats identical work and inflates quality counts.
+- **Evidence:** Real C4 output has 21,853 rate rows but only 3,775 distinct `(NPI, TIN)` keys; C5 writes `c5_address_candidates.csv` with 5,917 address candidates over those keys.
+- **Alternatives rejected:** Resolving candidates at `(NPI, TIN, billing_code)` grain or joining source address data directly on TIN, which NPPES and CMS DAC do not expose.
+- **Confidence / risk:** High for pipeline grain. TIN-to-address remains `UNVERIFIED` until group or directory evidence is added; PTD proves only NPI-to-TIN.

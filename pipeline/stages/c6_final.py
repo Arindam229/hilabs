@@ -206,7 +206,8 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
     audit.append(["Item", "Detail"])
     audit.append(["C5 input", str(c5_path)])
     audit.append(["C6 address audit", str(audit_path)])
-    audit.append(["Candidate key", "(NPI, TIN, Billing Code, Address)"])
+    audit.append(["Candidate key", "(NPI, TIN, Address)"])
+    audit.append(["Rate join", "C4 rates attach to C5 candidates on (NPI, TIN)"])
     audit.append(["Selection", "one canonical address per (NPI, TIN, Billing Code)"])
     audit.append(["API", "Unavailable"])
     for c in audit[1]:
