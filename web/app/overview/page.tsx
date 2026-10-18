@@ -122,7 +122,7 @@ export default function OverviewPage() {
           </div>
         </div>
         {/* C2 Network Summary */}
-      {c2 && (
+      {c2 ? (
         <Card>
           <CardHeader>
             <CardTitle>C2 PPO Network Classification</CardTitle>
@@ -154,6 +154,8 @@ export default function OverviewPage() {
             </div>
           </CardContent>
         </Card>
+      ) : (
+        <Card><CardContent className="p-6 text-muted-foreground">Loading C2 network data…</CardContent></Card>
       )}
     </DashboardLayout>
     );
