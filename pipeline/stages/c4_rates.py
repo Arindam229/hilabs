@@ -188,6 +188,8 @@ def _c3_quality_score(cfg, rate_file_url):
     matches = [row for row in pq.read_table(metrics_path).to_pylist() if row["rate_file_url"] == rate_file_url]
     if len(matches) != 1:
         raise ValueError(f"C3 has no unique metric row for C2 rate file {rate_file_url!r}")
+    if matches[0].get("is_sampled", False):
+        raise ValueError("C4 cannot use sampled C3 metrics; rerun C3 with PTD_C3_SAMPLE_EVERY=1.")
     return float(matches[0]["quality_score"])
 
 

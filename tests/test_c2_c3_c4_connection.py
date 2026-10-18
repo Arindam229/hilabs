@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pyarrow.parquet as pq
+import pytest
 
 from pipeline.config import Config
 from pipeline.stages.c1_index import run_c1
@@ -57,3 +58,14 @@ def test_c2_candidate_queue_drives_c3_then_c4_from_source_archive(tmp_path: Path
     summary = json.loads((tmp_path / "data" / "stage" / "c4" / "c4_summary.json").read_text())
     assert c4.counts["curated_records"] == 3
     assert summary["source_rate_file_url"] == "https://example.test/healthnet-ca.json"
+
+
+def test_c4_rejects_sampled_c3_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    cfg = _cfg_with_source_archive(tmp_path)
+    run_c1(cfg)
+    run_c2(cfg)
+    monkeypatch.setenv("PTD_C3_SAMPLE_EVERY", "2")
+    run_c3(cfg)
+
+    with pytest.raises(ValueError, match="sampled C3"):
+        run_c4(cfg)

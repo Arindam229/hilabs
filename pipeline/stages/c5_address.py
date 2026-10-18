@@ -8,7 +8,10 @@ import json
 import os
 import re
 import time
+import urllib.parse
+import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 
 try:
@@ -25,6 +28,7 @@ from pipeline.io.manifest import write_manifest
 C5_COLUMNS = [
     "NPI", "TIN", "Address", "Billing_Code", "Specialty", "Rate",
     "Address_Status", "Address_Confidence", "Address_Source", "Address_Source_Count",
+    "Address_Score", "Address_Verification_Status",
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
     "Geocode_Status",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code",
@@ -35,6 +39,7 @@ C5_COLUMNS = [
 CANDIDATE_COLUMNS = [
     "NPI", "TIN", "TIN_Business_Name", "Address", "Normalized_Address",
     "Address_Status", "Address_Confidence", "Address_Source", "Address_Source_Count",
+    "Address_Score", "Address_Verification_Status",
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code", "CMS_Specialty",
     "Alternative_Addresses",
@@ -193,6 +198,29 @@ def _address_role(addr: str) -> str:
     if "PO BOX" in u or "P.O. BOX" in u or "P O BOX" in u:
         return "mailing/po_box"
     return "practice"
+
+
+def score_address_candidate(candidate: dict[str, Any]) -> tuple[int, str]:
+    """Score physical-practice evidence; not proof that a TIN owns address."""
+    sources = candidate.get("sources", set())
+    families = candidate.get("families", set())
+    score = 0
+    if "CMS_NPD_LOCATION" in sources:
+        score += 60
+    if "CMS_DAC" in sources:
+        score += 50
+    if "PTD_ADDRESS" in sources:
+        score += 40
+    if "NPPES_PL" in sources:
+        score += 30
+    if "NPPES" in sources:
+        score += 10
+    if len(families) >= 2:
+        score += 20
+    if _address_role(_text(candidate.get("orig"))) == "mailing/po_box":
+        score -= 60
+    score = max(0, min(score, 100))
+    return score, "VERIFIED" if score >= 60 else "PROBABLE" if score >= 30 else "LOW"
 
 
 def _is_complete_address(addr: str) -> bool:
@@ -376,6 +404,101 @@ def _build_cms(outer_zip_path: Path, npi_set: set[str], primary_tax: dict[str, s
     return result
 
 
+def _npd_location_records(bundle: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract California active-location records from a CMS NPD FHIR bundle."""
+    records = []
+    for entry in bundle.get("entry", []):
+        resource = entry.get("resource", {})
+        if resource.get("resourceType") != "Location" or resource.get("status") == "inactive":
+            continue
+        address = resource.get("address", {})
+        if _text(address.get("state")).upper() != "CA":
+            continue
+        lines = address.get("line", [])
+        if not isinstance(lines, list):
+            lines = [lines]
+        line1, line2 = (lines + ["", ""])[:2]
+        orig = _orig_address(line1, line2, address.get("city"), address.get("state"), address.get("postalCode"))
+        norm = _normalize_address(line1, line2, address.get("city"), address.get("state"), address.get("postalCode"))
+        if norm:
+            records.append({
+                "source": "CMS_NPD_LOCATION", "orig": orig, "norm": norm,
+                "taxonomy": "", "updated": _text(resource.get("meta", {}).get("lastUpdated")),
+                "cms_specialty": "",
+            })
+    return records
+
+
+def _npd_get(path: str, params: dict[str, str]) -> dict[str, Any]:
+    base = os.environ.get("PTD_NPD_BASE_URL", "https://directory.cms.gov/fhir").rstrip("/")
+    url = f"{base}/{path.lstrip('/')}?{urllib.parse.urlencode(params)}"
+    request = urllib.request.Request(url, headers={"Accept": "application/fhir+json"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _npd_npis_to_fetch(npi_set: set[str], cache_dir: Path, max_npis: int) -> list[str]:
+    npis = [npi for npi in sorted(npi_set) if not (cache_dir / f"{npi}.json").is_file()]
+    return npis if max_npis == 0 else npis[:max_npis]
+
+
+def _fetch_npd_payload(npi: str) -> dict[str, Any]:
+    practitioner = _npd_get("Practitioner", {
+        "identifier": f"http://hl7.org/fhir/sid/us-npi|{npi}", "_count": "1",
+    })
+    entries = practitioner.get("entry", [])
+    practitioner_id = _text(entries[0].get("resource", {}).get("id")) if entries else ""
+    roles = _npd_get("PractitionerRole", {
+        "practitioner": f"Practitioner/{practitioner_id}", "active": "true",
+        "_include": "PractitionerRole:location", "_count": "100",
+    }) if practitioner_id else {}
+    return {"practitioner": practitioner, "roles": roles}
+
+
+def _build_cms_npd(npi_set: set[str], cache_dir: Path, max_npis: int, workers: int = 4) -> tuple[dict[str, list[dict[str, str]]], dict[str, int]]:
+    """Fetch current CMS NPD locations once per NPI, with resumable raw-response cache."""
+    result: dict[str, list[dict[str, str]]] = {npi: [] for npi in npi_set}
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    stats = {"requested": 0, "cache_hits": 0, "api_success": 0, "api_errors": 0, "location_records": 0}
+    uncached_npis = _npd_npis_to_fetch(npi_set, cache_dir, max_npis)
+    cached_npis = sorted(npi for npi in npi_set if (cache_dir / f"{npi}.json").is_file())
+    stats["cache_hits"] = len(cached_npis)
+    stats["requested"] = len(uncached_npis)
+
+    def fetch_one(npi: str) -> tuple[str, dict[str, Any] | None]:
+        try:
+            payload = _fetch_npd_payload(npi)
+            (cache_dir / f"{npi}.json").write_text(json.dumps(payload), encoding="utf-8")
+            time.sleep(0.1)
+            return npi, payload
+        except (OSError, ValueError, TimeoutError):
+            return npi, None
+
+    fetched: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+        futures = [executor.submit(fetch_one, npi) for npi in uncached_npis]
+        for future in as_completed(futures):
+            npi, payload = future.result()
+            if payload is None:
+                stats["api_errors"] += 1
+            else:
+                fetched[npi] = payload
+                stats["api_success"] += 1
+
+    for npi in cached_npis + uncached_npis:
+        cache_path = cache_dir / f"{npi}.json"
+        payload = fetched.get(npi, {})
+        if not payload and cache_path.is_file():
+            try:
+                payload = json.loads(cache_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                payload = {}
+        records = _npd_location_records(payload.get("roles", {}))
+        result[npi] = records
+        stats["location_records"] += len(records)
+    return result, stats
+
+
 def _nucc_specialty(code: str, nucc: dict[str, dict[str, str]]) -> str:
     if not code:
         return ""
@@ -417,6 +540,19 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     # outer zip path
     nppes_map, primary_tax = _build_nppes(outer_zip, npi_set)
     cms_map = _build_cms(outer_zip, npi_set, primary_tax)
+    npd_map: dict[str, list[dict[str, str]]] = {npi: [] for npi in npi_set}
+    npd_stats: dict[str, Any] = {"enabled": False}
+    if os.environ.get("PTD_NPD_API") == "1":
+        try:
+            max_npis = int(os.environ.get("PTD_NPD_MAX_NPIS", "100"))
+        except ValueError:
+            max_npis = 100
+        try:
+            npd_workers = int(os.environ.get("PTD_NPD_WORKERS", "4"))
+        except ValueError:
+            npd_workers = 4
+        npd_map, npd_stats = _build_cms_npd(npi_set, out_dir / "cms_npd_cache", max_npis, npd_workers)
+        npd_stats["enabled"] = True
 
     # outputs
     c5_path = out_dir / "c5result.csv"
@@ -456,7 +592,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
     pair_candidates: dict[tuple[str, str], tuple[dict[str, dict[str, Any]], str]] = {}
     for (npi, tin), business_name in candidate_keys.items():
         nppes_addrs = nppes_map.get(npi, []) if _valid_npi(npi) else []
-        cms_addrs = cms_map.get(npi, []) if _valid_npi(npi) else []
+        cms_addrs = (cms_map.get(npi, []) + npd_map.get(npi, [])) if _valid_npi(npi) else []
         addr_groups, status = _resolve_address_candidates(npi, nppes_addrs, cms_addrs)
         pair_candidates[(npi, tin)] = (addr_groups, status)
         if status == "CORROBORATED":
@@ -474,6 +610,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
             sources = group.get("sources", set())
             families = group.get("families", set())
             orig_addr = group.get("orig", "")
+            score, verification = score_address_candidate(group)
             tier = "Tier 4" if not norm else "Tier 2" if len(families) >= 2 else "Tier 3" if _is_complete_address(orig_addr) else "Tier 4"
             pwriter.writerow({
                 "NPI": npi,
@@ -485,6 +622,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Address_Confidence": "HIGH" if tier == "Tier 2" else "MEDIUM" if tier == "Tier 3" else "NONE" if not norm else "LOW",
                 "Address_Source": ";".join(sorted(sources)) if sources else "NONE",
                 "Address_Source_Count": len(sources),
+                "Address_Score": score,
+                "Address_Verification_Status": verification,
                 "Address_Record_Updated_At": group.get("updated", ""),
                 "Address_Role": _address_role(orig_addr) if norm else "unknown",
                 "Address_Evidence_Tier": tier,
@@ -537,6 +676,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 confidence = "NONE"
                 role = "unknown"
                 source_count = 0
+                score = 0
+                verification = "NONE"
             else:
                 g = addr_groups[norm]
                 orig_addr = g["orig"]
@@ -554,6 +695,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 confidence = "HIGH" if tier == "Tier 2" else "MEDIUM" if tier == "Tier 3" else "LOW"
                 role = _address_role(orig_addr)
                 source_count = len(sources)
+                score, verification = score_address_candidate(g)
 
             # specialty
             nucc_spec = _nucc_specialty(tax_code, nucc)
@@ -620,6 +762,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Address_Confidence": confidence,
                 "Address_Source": source_str if source_str else ("NONE" if status in ("UNRESOLVED", "INVALID_NPI") else ""),
                 "Address_Source_Count": source_count,
+                "Address_Score": score,
+                "Address_Verification_Status": verification,
                 "Address_Record_Updated_At": updated,
                 "Address_Role": role,
                 "Address_Evidence_Tier": tier,
@@ -707,8 +851,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         "cms_file": "DAC_NationalDownloadableFile.csv",
         "nucc_file": "nucc_taxonomy_261.csv",
         "nucc_mapped_codes": len(nucc),
-        "api_status": "unavailable (network blocked / no NPI search param)",
-        "sources": ["NPPES", "NPPES_PL", "CMS_DAC"],
+        "api_status": npd_stats,
+        "sources": ["NPPES", "NPPES_PL", "CMS_DAC", "CMS_NPD_LOCATION"],
     }
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
