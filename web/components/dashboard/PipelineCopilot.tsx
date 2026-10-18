@@ -159,12 +159,15 @@ export function PipelineCopilot() {
     }
   };
 
-  // Structured Markdown Parser with Table Support for Clean UI Display
+  // Structured Markdown Parser with Robust Numbering, List, Code, and Table Support
   const renderFormattedText = (raw: string) => {
     const lines = raw.split("\n");
     const elements: React.ReactNode[] = [];
-    let currentList: { type: "ul" | "ol"; items: React.ReactNode[] } | null = null;
+    let currentBulletList: React.ReactNode[] = [];
     let tableLines: string[] = [];
+    let inCodeBlock = false;
+    let codeBlockLines: string[] = [];
+    let isExpectingSubItems = false;
 
     const flushTable = () => {
       if (tableLines.length >= 2) {
@@ -213,87 +216,131 @@ export function PipelineCopilot() {
       tableLines = [];
     };
 
-    const flushList = () => {
-      if (currentList) {
-        if (currentList.type === "ul") {
-          elements.push(
-            <ul key={`ul-${elements.length}`} className="my-1.5 space-y-1 list-disc pl-4 text-xs">
-              {currentList.items.map((item, idx) => (
-                <li key={idx} className="leading-relaxed text-foreground/90">
-                  {item}
-                </li>
-              ))}
-            </ul>
-          );
-        } else {
-          elements.push(
-            <ol key={`ol-${elements.length}`} className="my-1.5 space-y-1 list-decimal pl-4 text-xs">
-              {currentList.items.map((item, idx) => (
-                <li key={idx} className="leading-relaxed text-foreground/90 font-medium">
-                  {item}
-                </li>
-              ))}
-            </ol>
-          );
-        }
-        currentList = null;
+    const flushBullets = () => {
+      if (currentBulletList.length > 0) {
+        elements.push(
+          <ul key={`ul-${elements.length}`} className="my-1.5 space-y-1.5 pl-1 text-xs">
+            {currentBulletList.map((item, idx) => (
+              <li key={idx} className="flex items-start gap-2 leading-relaxed text-foreground/90">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary/70 mt-1.5 flex-shrink-0" />
+                <span className="flex-1">{item}</span>
+              </li>
+            ))}
+          </ul>
+        );
+        currentBulletList = [];
       }
     };
 
     lines.forEach((line, i) => {
       const trimmed = line.trim();
 
-      // Check if line is a table row
+      // 1. Code blocks (```)
+      if (trimmed.startsWith("```")) {
+        if (inCodeBlock) {
+          elements.push(
+            <pre
+              key={`code-${elements.length}`}
+              className="my-2 p-3 rounded-lg bg-muted/80 border border-border text-[11px] font-mono overflow-x-auto text-foreground"
+            >
+              <code>{codeBlockLines.join("\n")}</code>
+            </pre>
+          );
+          codeBlockLines = [];
+          inCodeBlock = false;
+        } else {
+          flushBullets();
+          flushTable();
+          isExpectingSubItems = false;
+          inCodeBlock = true;
+          codeBlockLines = [];
+        }
+        return;
+      }
+      if (inCodeBlock) {
+        codeBlockLines.push(line);
+        return;
+      }
+
+      // 2. Table rows
       if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
-        flushList();
+        flushBullets();
+        isExpectingSubItems = false;
         tableLines.push(trimmed);
         return;
       } else if (tableLines.length > 0) {
         flushTable();
       }
 
+      // 3. Blank lines
       if (!trimmed) {
-        flushList();
+        flushBullets();
         elements.push(<div key={`sp-${i}`} className="h-1.5" />);
         return;
       }
 
-      // Heading 3 / 4
-      if (trimmed.startsWith("### ")) {
-        flushList();
+      // 4. Headings (#, ##, ###, ####)
+      if (trimmed.startsWith("#")) {
+        flushBullets();
+        flushTable();
+        isExpectingSubItems = false;
+        const level = (trimmed.match(/^#+/) || ["#"])[0].length;
+        const text = trimmed.replace(/^#+\s*/, "");
+        if (level <= 2) {
+          elements.push(
+            <h3 key={`h-${i}`} className="font-bold text-sm text-foreground mt-3 mb-1.5 pb-1 border-b border-border/60">
+              {parseInline(text)}
+            </h3>
+          );
+        } else {
+          elements.push(
+            <h4 key={`h-${i}`} className="font-bold text-xs text-primary mt-2.5 mb-1 pb-0.5 border-b border-border/40">
+              {parseInline(text)}
+            </h4>
+          );
+        }
+        return;
+      }
+
+      // 5. Ordered / Numbered List Item (e.g., "1. Title", "2) Title", "Step 1: Title")
+      const numMatch = trimmed.match(/^(?:(?:Step|Rule|Phase|Stage|Item)\s+)?(\d+)[\.\)\:\-]\s*(.*)$/i);
+      if (numMatch) {
+        flushBullets();
+        flushTable();
+        const num = numMatch[1];
+        const content = numMatch[2];
+        isExpectingSubItems = content.endsWith(":");
+
         elements.push(
-          <h4 key={`h-${i}`} className="font-bold text-sm text-primary mt-2.5 mb-1 pb-1 border-b border-border/50">
-            {parseInline(trimmed.replace("### ", ""))}
-          </h4>
+          <div key={`num-${i}`} className="flex items-start gap-2.5 my-2">
+            <span className="flex-shrink-0 flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-primary/15 text-primary font-bold text-[11px] mt-0.5 border border-primary/25 shadow-xs">
+              {num}
+            </span>
+            <div className="flex-1 text-xs leading-relaxed text-foreground/90 font-medium">
+              {parseInline(content)}
+            </div>
+          </div>
         );
         return;
       }
 
-      // Unordered list item
-      if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-        const content = trimmed.replace(/^[-*]\s+/, "");
-        if (!currentList || currentList.type !== "ul") {
-          flushList();
-          currentList = { type: "ul", items: [] };
-        }
-        currentList.items.push(parseInline(content));
+      // 6. Unordered Bullet Item (- item, * item, • item)
+      if (trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ")) {
+        const content = trimmed.replace(/^[-*•]\s+/, "");
+        currentBulletList.push(parseInline(content));
+        isExpectingSubItems = content.endsWith(":");
         return;
       }
 
-      // Ordered list item
-      const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
-      if (numMatch) {
-        const content = numMatch[2];
-        if (!currentList || currentList.type !== "ol") {
-          flushList();
-          currentList = { type: "ol", items: [] };
-        }
-        currentList.items.push(parseInline(content));
+      // 7. Contextual sub-items: if immediately following a line ending with ":" (like "This included:", "This involved:")
+      if (isExpectingSubItems && (line.startsWith("  ") || line.startsWith("\t") || trimmed.length > 0)) {
+        currentBulletList.push(parseInline(trimmed));
         return;
       }
 
-      // Standard paragraph
-      flushList();
+      // 8. Standard paragraph
+      flushBullets();
+      isExpectingSubItems = trimmed.endsWith(":");
       elements.push(
         <p key={`p-${i}`} className="text-xs leading-relaxed my-1 text-foreground/90">
           {parseInline(trimmed)}
@@ -301,7 +348,7 @@ export function PipelineCopilot() {
       );
     });
 
-    flushList();
+    flushBullets();
     flushTable();
     return elements;
   };

@@ -71,6 +71,7 @@ Rules and Instructions:
 2. Quote exact numbers, rates, scores, NPIs, TINs, and specialties. Do not claim scores or metrics are undefined or missing when exact numbers are given above.
 3. Cite specific rule IDs (e.g., R-C2-01 to 08, R-C3-01 to 03, R-C4-SEL-01 to 07, R-C5-01 to 03) whenever explaining classification, grading, filtering, or corroboration.
 4. Be technically precise, authoritative, concise, and structured with markdown headings, tables, bullet points, and code spans.
+5. When enumerating stages, processes, or steps, always use explicit sequential numbering (e.g. "1. ", "2. ", "3. ") with bold titles. For secondary lists, use bullet points ("- ").
 {live_records_section}
 GROUND TRUTH CONTEXT:
 {context_text}"""
