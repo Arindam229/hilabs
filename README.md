@@ -137,7 +137,7 @@ flowchart LR
 
 ## 4. Quickstart
 
-**Requirements:** Python 3.11+, [`uv`](https://docs.astral.sh/uv/), about 3 GB of free disk, and the dataset archive.
+**Requirements:** Python 3.11+, [`uv`](https://docs.astral.sh/uv/), about 5 GB of free disk (2.4 GB archive plus about 2 GB of stage outputs), 8 GB+ RAM, Linux or macOS (Windows via WSL), and the dataset archive.
 
 ```bash
 git clone https://github.com/sivk-kex/hilabs.git && cd hilabs
@@ -165,7 +165,8 @@ make c7                     # cost-effectiveness              → data/out/c7_co
 | Environment variable | Effect |
 |---|---|
 | `PTD_DATA_DIR` | Folder that contains the dataset archive (default `data/`) |
-| `PTD_NPD_API=1` | Use the CMS National Provider Directory FHIR API in C5. Responses are cached (`PTD_NPD_MAX_NPIS`, `PTD_NPD_WORKERS`) |
+| `PTD_NPD_API=1` | Use the CMS National Provider Directory FHIR API in C5. Responses are cached per NPI. Each run fetches up to `PTD_NPD_MAX_NPIS` uncached NPIs (default 100; `0` = all); `PTD_NPD_WORKERS` (default 4) sets concurrency |
+| `PTD_GEOCODE=1` | Census geocoding of candidate addresses in C5 (off by default; results are cached). `PTD_GEOCODE_WORKERS` (default 8) sets concurrency |
 | `PTD_AS_OF` | Fixed reference date for freshness and expiry scoring, so reruns are reproducible |
 | `PTD_C3_WORKERS`, `PTD_C3_SAMPLE_EVERY` | C3 parallelism and explicit diagnostic sampling (C4 rejects sampled grades) |
 | `PTD_REVALIDATION_ZIP`, `PTD_MEDICARE_PROVIDER_ZIP`, `PTD_PECOS_ENROLLMENT_ZIP` | Use a standalone file in place of the copy inside the archive |
@@ -176,7 +177,7 @@ make c7                     # cost-effectiveness              → data/out/c7_co
 
 ## 5. Data sources
 
-All inputs ship inside **one archive** (2.28 GB, 133 members). Sizes and SHA-256 hashes are listed in `MANIFEST*.txt` inside it.
+All inputs ship inside **one archive** (2.39 GB, 136 members). Sizes and SHA-256 hashes are listed in `MANIFEST*.txt` inside it.
 
 ### 5.1 Provided by the problem statement
 
