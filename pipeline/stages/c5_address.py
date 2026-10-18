@@ -140,6 +140,39 @@ def _is_street_address(addr: str) -> bool:
     return bool(parsed.get("AddressNumber") and parsed.get("StreetName"))
 
 
+def _census_query_params(addr: str) -> dict[str, str]:
+    if usaddress is not None:
+        try:
+            parsed, _ = usaddress.tag(addr)
+            street_labels = (
+                "AddressNumber", "StreetNamePreDirectional", "StreetName",
+                "StreetNamePostType", "StreetNamePostDirectional", "OccupancyType",
+                "OccupancyIdentifier",
+            )
+            street = " ".join(parsed.get(label, "") for label in street_labels if parsed.get(label, "")).strip()
+            if street and parsed.get("PlaceName") and parsed.get("StateName"):
+                return {
+                    "street": street,
+                    "city": parsed["PlaceName"],
+                    "state": parsed["StateName"],
+                    "zip": parsed.get("ZipCode", ""),
+                    "benchmark": "Public_AR_Current",
+                    "format": "json",
+                }
+        except (usaddress.RepeatedLabelError, ValueError):
+            pass
+    parts = [part.strip() for part in addr.split(",")]
+    last = parts[-1].split() if parts else []
+    return {
+        "street": parts[0] if parts else "",
+        "city": parts[-2] if len(parts) >= 2 else "",
+        "state": last[0] if last else "",
+        "zip": last[1] if len(last) > 1 else "",
+        "benchmark": "Public_AR_Current",
+        "format": "json",
+    }
+
+
 def _geocode_address(addr: str, cache: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Census geocode one physical address; cache avoids repeated HTTP calls."""
     key = _normalize_address(addr, "", "", "", "")
@@ -150,9 +183,10 @@ def _geocode_address(addr: str, cache: dict[str, dict[str, Any]]) -> dict[str, A
     if key in cache:
         return cache[key]
     try:
-        params = urllib.parse.urlencode({"address": addr, "benchmark": "Public_AR_Current", "format": "json"})
+        params = urllib.parse.urlencode(_census_query_params(addr))
         url = "https://geocoding.geo.census.gov/geocoder/locations/address?" + params
-        with urllib.request.urlopen(url, timeout=10) as resp:
+        timeout = float(os.environ.get("PTD_GEOCODE_TIMEOUT", "5"))
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         matches = data.get("result", {}).get("addressMatches", [])
         if not matches:
@@ -330,10 +364,34 @@ def _apply_geospatial_support(
     profiles = _build_tin_profiles(pair_candidates)
     trusted_by_tin: dict[str, list[tuple[str, float, float]]] = {}
     candidates = []
+    address_lookup: dict[str, str] = {}
+    for groups, _ in pair_candidates.values():
+        for norm, group in groups.items():
+            if norm:
+                address_lookup.setdefault(norm, _text(group.get("orig")))
+    geocodes: dict[str, dict[str, Any]] = {}
+    if enabled:
+        try:
+            workers = max(1, min(16, int(os.environ.get("PTD_GEOCODE_WORKERS", "8"))))
+        except ValueError:
+            workers = 8
+        pending = {
+            norm: address for norm, address in address_lookup.items()
+            if _normalize_address(address, "", "", "", "") not in cache
+        }
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_geocode_address, address, cache): norm for norm, address in pending.items()}
+            for future, norm in ((future, norm) for future, norm in futures.items()):
+                try:
+                    geocodes[norm] = future.result()
+                except (OSError, ValueError, KeyError, TimeoutError):
+                    geocodes[norm] = {"status": "error", "latitude": None, "longitude": None}
 
     for (npi, tin), (groups, _) in pair_candidates.items():
         for norm, group in groups.items():
-            geo = _geocode_address(_text(group.get("orig")), cache)
+            geo = geocodes.get(norm)
+            if geo is None:
+                geo = _geocode_address(_text(group.get("orig")), cache)
             group["geo"] = geo
             group["geo_score"] = 0
             group["geo_flag"] = "not_measured"

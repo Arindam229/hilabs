@@ -4,6 +4,7 @@ import pytest
 
 from pipeline.stages.c5_address import (
     _build_tin_profiles,
+    _census_query_params,
     _haversine_km,
     _npd_location_records,
     _npd_npis_to_fetch,
@@ -119,6 +120,17 @@ def test_c5_tin_profile_supports_modal_zip_and_reused_site_without_proving_owner
     support = _tin_geographic_support(profiles["11-1111111"], "1000000001", "10 MAIN ST LOS ANGELES CA 90001")
 
     assert support == (20, "SUPPORTED", "900", 2)
+
+
+def test_census_geocoder_receives_split_street_city_state_zip_fields():
+    assert _census_query_params("1600 Pennsylvania Ave NW, Washington, DC 20500") == {
+        "street": "1600 Pennsylvania Ave NW",
+        "city": "Washington",
+        "state": "DC",
+        "zip": "20500",
+        "benchmark": "Public_AR_Current",
+        "format": "json",
+    }
 
 
 def test_c6_selects_highest_scored_address_before_source_tier():
