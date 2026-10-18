@@ -1,6 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 from pipeline.stages.c5_address import (
+    _haversine_km,
     _npd_location_records,
     _npd_npis_to_fetch,
     _resolve_address_candidates,
@@ -76,6 +79,28 @@ def test_c5_treats_current_cms_directory_location_as_verified():
     }
 
     assert score_address_candidate(directory_location) == (60, "VERIFIED")
+
+
+def test_c5_haversine_scores_near_verified_tin_site_as_support_not_proof():
+    # Los Angeles City Hall to a nearby downtown point: hand-checked ~0.5 km.
+    assert _haversine_km(34.0537, -118.2428, 34.0580, -118.2468) == pytest.approx(0.59, abs=0.05)
+
+    candidate = {
+        "orig": "100 Main Street, Los Angeles, CA 90001",
+        "sources": {"NPPES"},
+        "families": {"NPPES"},
+    }
+    assert score_address_candidate(candidate, geo_score=10) == (20, "LOW")
+
+
+def test_c5_geography_cannot_upgrade_candidate_to_verified():
+    candidate = {
+        "orig": "100 Main Street, Los Angeles, CA 90001",
+        "sources": {"CMS_DAC"},
+        "families": {"CMS_DAC"},
+    }
+
+    assert score_address_candidate(candidate, geo_score=10) == (60, "PROBABLE")
 
 
 def test_c6_selects_highest_scored_address_before_source_tier():
