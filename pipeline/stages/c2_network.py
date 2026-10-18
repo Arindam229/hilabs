@@ -224,3 +224,73 @@ def run_c2(cfg: Config) -> StageResult:
         started_at=started_at,
     )
     return StageResult("c2", summary, (plan_network_path, rate_files_path, excel_path, manifest_path))
+
+
+def filter_ppo_network(df):
+    """Self-training TF-IDF + relational URL grouping (optional alternative C2)."""
+    import re
+
+    try:
+        import pandas as pd
+    except (ImportError, OSError):
+        raise RuntimeError("pandas is required for filter_ppo_network")
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.linear_model import LogisticRegression
+    except (ImportError, OSError) as exc:
+        raise RuntimeError(f"scikit-learn is required: {exc}")
+
+    work = df.copy()
+
+    # Column detection
+    name_col = "plan_name" if "plan_name" in work.columns else ("name" if "name" in work.columns else work.columns[0])
+    url_col = "rate_file_url" if "rate_file_url" in work.columns else ("url" if "url" in work.columns else None)
+    market_col = "market_type" if "market_type" in work.columns else None
+    plan_id_col = "plan_id" if "plan_id" in work.columns else None
+
+    # 1. Scope filtering: California + commercial/group
+    if market_col is not None:
+        work = work[work[market_col].astype(str).str.lower().isin({"group", "commercial", "commercial group"}) | work[market_col].astype(str).str.lower().str.contains("group", na=False)]
+    # California filter
+    ca_mask = pd.Series(False, index=work.index)
+    for col in (name_col, plan_id_col, url_col):
+        if col is not None:
+            ca_mask = ca_mask | work[col].astype(str).str.contains(r"\bCA\b|california|_ca_", case=False, regex=True, na=False)
+    if ca_mask.any():
+        work = work[ca_mask]
+
+    # 2. Deterministic auto-labeling
+    import numpy as np
+
+    work["ml_label"] = np.nan
+    neg = re.compile(r"HMO|EPO|POS|Point of Service|Health Maintenance|Exclusive Provider|Medicare|Medicaid", re.IGNORECASE)
+    pos = re.compile(r"PPO|Preferred Provider|Prfrd", re.IGNORECASE)
+    work.loc[work[name_col].astype(str).str.contains(neg, regex=True, na=False), "ml_label"] = 0
+    work.loc[work[name_col].astype(str).str.contains(pos, regex=True, na=False), "ml_label"] = 1
+
+    # 3. TF-IDF fallback for ambiguous plans
+    labeled = work[work["ml_label"].notna()]
+    ambiguous = work[work["ml_label"].isna()]
+    if not ambiguous.empty and not labeled.empty:
+        train_names = labeled[name_col].astype(str).tolist()
+        train_labels = labeled["ml_label"].astype(int).tolist()
+        vectorizer = TfidfVectorizer()
+        X_train = vectorizer.fit_transform(train_names)
+        model = LogisticRegression(max_iter=1000)
+        model.fit(X_train, train_labels)
+        X_amb = vectorizer.transform(ambiguous[name_col].astype(str).tolist())
+        preds = model.predict(X_amb)
+        work.loc[ambiguous.index, "ml_label"] = preds
+
+    # 4. Relational URL grouping
+    if url_col is not None:
+        ppo_urls = set(work.loc[work["ml_label"] == 1, url_col].astype(str).tolist())
+        work["is_final_ppo"] = work[url_col].astype(str).isin(ppo_urls)
+    else:
+        work["is_final_ppo"] = work["ml_label"] == 1
+
+    # 5. Cleanup & export
+    result = work[work["is_final_ppo"] == True].copy()
+    if url_col is not None:
+        result = result.drop_duplicates(subset=[url_col])
+    return result
