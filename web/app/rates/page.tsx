@@ -291,7 +291,7 @@ export default function RatesPage() {
         {/* Toolbar */}
         <Card>
           <CardContent className="p-4">
-            <div className="grid gap-4 w-full" style={{gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))"}}>
+            <div className="flex flex-wrap items-center gap-3 w-full">
               {/* Global Search */}
               <div className="relative flex-1 min-w-[250px] max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
