@@ -9,6 +9,8 @@ import {
   ChevronUp,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   X,
   Download,
   Columns,
@@ -549,47 +551,89 @@ export default function RatesPage() {
                 </ScrollArea>
 
                 {/* Pagination */}
-                <div className="flex items-center justify-between p-4 border-t">
-                  <div className="flex items-center gap-2">
-                    <Select
-                      value={String(pagination.pageSize)}
-                      onValueChange={(value) =>
-                        setPagination((prev) => ({ ...prev, pageSize: Number(value) }))
-                      }
-                    >
-                      <SelectTrigger className="h-8 text-sm w-[100px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[10, 25, 50, 100].map((size) => (
-                          <SelectItem key={size} value={String(size)}>
-                            {size} per page
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t lg:pr-72">
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                    <span>
+                      Showing{" "}
+                      <strong className="text-foreground font-semibold">
+                        {data.length > 0 ? (pagination.pageIndex * pagination.pageSize + 1).toLocaleString() : 0}
+                      </strong>
+                      –
+                      <strong className="text-foreground font-semibold">
+                        {Math.min((pagination.pageIndex + 1) * pagination.pageSize, data.length).toLocaleString()}
+                      </strong>{" "}
+                      of{" "}
+                      <strong className="text-foreground font-semibold">{data.length.toLocaleString()}</strong> rates
+                    </span>
+                    <div className="flex items-center gap-1.5 ml-1">
+                      <span className="text-xs">Per page:</span>
+                      <Select
+                        value={String(pagination.pageSize)}
+                        onValueChange={(value) =>
+                          setPagination((prev) => ({ ...prev, pageSize: Number(value) }))
+                        }
+                      >
+                        <SelectTrigger className="h-8 text-xs w-[85px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[10, 25, 50, 100].map((size) => (
+                            <SelectItem key={size} value={String(size)}>
+                              {size}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
+
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => table.setPageIndex(0)}
+                      disabled={!table.getCanPreviousPage()}
+                      className="h-8 w-8 p-0"
+                      title="First page"
+                      aria-label="First page"
+                    >
+                      <ChevronsLeft className="h-4 w-4" />
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => table.previousPage()}
                       disabled={!table.getCanPreviousPage()}
+                      className="h-8 px-2.5 gap-1 text-xs"
                       aria-label="Previous page"
                     >
                       <ChevronLeft className="h-4 w-4" />
+                      <span className="hidden sm:inline">Prev</span>
                     </Button>
-                    <span className="text-sm text-muted-foreground">
-                      Page {pagination.pageIndex + 1} of {table.getPageCount()}
+                    <span className="text-xs font-medium px-3 py-1.5 rounded-md bg-muted/60 text-foreground border border-border/50">
+                      Page {pagination.pageIndex + 1} of {table.getPageCount().toLocaleString()}
                     </span>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => table.nextPage()}
                       disabled={!table.getCanNextPage()}
+                      className="h-8 px-2.5 gap-1 text-xs"
                       aria-label="Next page"
                     >
+                      <span className="hidden sm:inline">Next</span>
                       <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+                      disabled={!table.getCanNextPage()}
+                      className="h-8 w-8 p-0"
+                      title="Last page"
+                      aria-label="Last page"
+                    >
+                      <ChevronsRight className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
