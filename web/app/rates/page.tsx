@@ -289,7 +289,7 @@ export default function RatesPage() {
         className="space-y-6"
       >
         {/* Toolbar */}
-        <Card>
+        <Card className="overflow-visible">
           <CardContent className="p-4">
             <div className="flex flex-wrap items-center gap-3 w-full">
               {/* Global Search */}
