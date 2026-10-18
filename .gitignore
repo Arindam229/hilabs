@@ -221,6 +221,7 @@ __marimo__/
 
 #Agents 
 *.claude 
+*.codex
 *.codegraph 
 *.cursor
 *.kiro
@@ -238,3 +239,6 @@ GEMINI.md
 
 # Node
 node_modules/
+
+# Codex
+.codex/
