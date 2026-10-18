@@ -290,7 +290,7 @@ export default function RatesPage() {
         {/* Toolbar */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="grid gap-4 w-full" style={{gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))"}}>
               {/* Global Search */}
               <div className="relative flex-1 min-w-[250px] max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -426,7 +426,7 @@ export default function RatesPage() {
         </div>
 
         {/* Table */}
-        <Card>
+        <Card className="overflow-x-auto shadow-sm border">
           <CardContent className="p-0">
             {loading ? (
               <div className="p-8">
@@ -440,7 +440,7 @@ export default function RatesPage() {
                   <Table>
                     <TableHeader>
                       {table.getHeaderGroups().map((headerGroup) => (
-                        <TableRow key={headerGroup.id}>
+                        <TableRow key={headerGroup.id} className="bg-muted">
                           {headerGroup.headers.map((header) => (
                             <TableHead
                               key={header.id}
