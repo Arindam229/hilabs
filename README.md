@@ -337,7 +337,7 @@ The core pipeline (C1–C7) is **deterministic and rule-based**: every decision 
 | Approach | Outcome | Decision |
 |---|---|---|
 | Sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`), cosine similarity to a PPO archetype | Scores compress at the bottom: about 1,300 plans in 0.0–0.1, about 1,550 in 0.1–0.2, about 330 in 0.2–0.3, about 75 in 0.3–0.4; **maximum 0.418; 0 plans ≥ 0.5**. A 0.8 threshold would catch **0 %** of PPO plans (`nlp_score` distribution over all plans, shown on the dashboard overview) | Rejected as a classifier. Kept only as a reviewer column (`nlp_score`); its ≥ 0.80 fallback cannot fire on this data |
-| Logistic-regression classifier on plan names | Confidence **below 0.5** (team evaluation) | Rejected |
+| Logistic regression (`scikit-learn` `LogisticRegression`) on plan names | Confidence **below 0.5** (team evaluation) | Rejected |
 | TF-IDF + grouping plans by shared rate-file URL (`5a277c1`) | **Mislabelled HMO plans as PPO**, because HMO and PPO plans share Health Net's single CA rate file | Reverted (`ab96954`) |
 | **Regex tokens + deterministic scope rules** (`R-C2-01`…`07`) | Every decision explained by a rule ID; restrictive tokens (HMO/EPO/POS) checked first; ambiguous plans left `UNRESOLVED` instead of guessed | **Used** |
 
