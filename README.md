@@ -33,10 +33,11 @@ Centene index files ─► C1 parse ─► C2 PPO network ─► C3 grade files 
    - [C5 · Address engine (heuristic scoring)](#c5--the-address-engine-heuristic-scoring)
    - [C6 · Final rate file](#c6--final-rate-file)
    - [C7 · Cost-effectiveness](#c7--cost-effectiveness-brownie-point)
-8. [Deliverables map](#8-deliverables-map)
-9. [Engineering principles](#9-engineering-principles)
-10. [Repository layout](#10-repository-layout)
-11. [Known limitations](#11-known-limitations)
+8. [AI models: NLP fallback and RAG copilot](#8-ai-models-nlp-fallback-and-rag-copilot)
+9. [Deliverables map](#9-deliverables-map)
+10. [Engineering principles](#10-engineering-principles)
+11. [Repository layout](#11-repository-layout)
+12. [Known limitations](#12-known-limitations)
 
 ---
 
@@ -286,7 +287,37 @@ The NPPES-only baseline verified **4.8 %** of rows.
 
 ---
 
-## 8. Deliverables map
+## 8. AI models: NLP fallback and RAG copilot
+
+The core pipeline (C1–C7) is **deterministic and rule-based**: every decision is traceable to a rule ID. Models are used in two places only, and neither can change an extracted rate.
+
+| Component | Model | Runs | Role | Changes pipeline outputs? |
+|---|---|---|---|---|
+| **C2 semantic fallback** (`R-C2-08-NLP_FALLBACK`) | `all-MiniLM-L6-v2` (sentence-transformers, 384-dim embeddings) | Locally, CPU | For a CA commercial-group plan whose name has **no** PPO/HMO/EPO/POS token, cosine similarity to a PPO archetype ("open network preferred provider organization with out-of-network benefits"). Score ≥ 0.80 → PPO (high ≥ 0.90, medium ≥ 0.85, else low confidence). Every plan also gets an `nlp_score` column for review | **Only if `sentence-transformers` is installed.** Explicit tokens always win: restrictive tokens are checked first and the fallback only runs after every rule has failed. The results in this README were produced **without** it (453 PPO plans, all by explicit tokens) |
+| **RAG copilot — retrieval** | `all-MiniLM-L6-v2` | Locally | Embeds and searches the project's own knowledge: `docs/DECISIONS.md`, `docs/ps/DATA_FINDINGS.md`, the problem statement, and every stage's manifest and summary. Index cached at `data/rag/rag_index.parquet` | No (read-only) |
+| **RAG copilot — record lookup** | DuckDB (no model) | Locally | Exact, parameterised lookups over pipeline outputs by NPI, TIN, billing code or specialty, so answers about specific providers come from the data, not the model | No (read-only) |
+| **RAG copilot — generation** | `qwen2.5:1.5b` via [Ollama](https://ollama.com) (override: `LOCAL_LLM_MODEL`, `LOCAL_LLM_URL`) | Locally on `127.0.0.1:11434` | Answers questions grounded in the retrieved chunks and records ("why was this address chosen?", "what does R-C5-12 do?") | No (read-only) |
+
+**Why these choices:**
+- **Everything runs locally.** No pipeline data or provider records leave the machine, and there are no API keys or per-query costs.
+- **Small models.** A ~1.5B-parameter LLM and a 22M-parameter embedder run on a laptop CPU.
+- **Grounded answers.** The copilot's system prompt tells it to answer from the retrieved project documents, the exact DuckDB record lookups and benchmark figures, and to cite rule IDs. So it explains the pipeline from the pipeline's own evidence rather than from general knowledge.
+
+**Running the copilot and dashboard (optional):**
+
+```bash
+uv pip install sentence-transformers          # optional dependency (not needed for make pipeline)
+ollama pull qwen2.5:1.5b                      # local LLM
+uv run python -m pipeline rag                 # build/refresh the retrieval index from the latest outputs
+uv run python -m pipeline.rag.server          # RAG service on http://127.0.0.1:8005
+cd web && npm install && npm run dev          # Next.js dashboard (overview, rates, address, quality, audit, copilot)
+```
+
+> The dashboard (`web/`) reads pipeline outputs from `data/` and talks to the RAG service through `RAG_DAEMON_URL` (default `http://127.0.0.1:8005`). It is the PS's brownie point 7(a), a structured UI for executive and analyst views.
+
+---
+
+## 9. Deliverables map
 
 | # | PS deliverable | Where |
 |---|---|---|
@@ -296,11 +327,11 @@ The NPPES-only baseline verified **4.8 %** of rows.
 | 4 | Summary metrics | §1 above · `data/stage/*/_manifest.json` |
 | 5 | Video | — |
 | 6 | Re-runnable code repo | This repo: `make pipeline`, no hardcoded paths |
-| 7 | Brownie points | C7 → `data/out/c7_cost_effectiveness.xlsx` · UI scaffold in `api/` + `web/` |
+| 7 | Brownie points | (a) Next.js dashboard + local RAG copilot (`web/`, `pipeline/rag/`, §8) · (b) C7 → `data/out/c7_cost_effectiveness.xlsx` |
 
 ---
 
-## 9. Engineering principles
+## 10. Engineering principles
 
 - **Stream, never load.** `ijson` over zip members; bounded reservoirs and SQLite for duplicate detection; memory stays flat as files grow.
 - **Raw is immutable.** Source fields are kept next to normalized ones, and nothing is overwritten.
@@ -311,7 +342,7 @@ The NPPES-only baseline verified **4.8 %** of rows.
 
 ---
 
-## 10. Repository layout
+## 11. Repository layout
 
 ```text
 pipeline/
@@ -332,16 +363,19 @@ tests/                     pytest suite (one file per stage)
 docs/ps/                   problem statement (verbatim) + verified data findings
 docs/DECISIONS.md          rule log: R-C1 … R-C7
 docs/DATA_SOURCES.md       archive contents, sources, as-of dates
-api/ · web/                UI scaffold (FastAPI + Next.js)
+pipeline/rag/              RAG copilot: indexer, DuckDB record lookups, engine, local server
+web/                       Next.js dashboard (overview, rates, address, quality, audit, copilot)
+api/                       FastAPI scaffold
 config.yaml · Makefile     configuration and stage orchestration
 ```
 
 ---
 
-## 11. Known limitations
+## 12. Known limitations
 
 - **Hidden listings.** The meaning of Health Net's hidden-listing reasons ("Claims History", "Provider Request", …) is our reading of its labels; Health Net does not publish definitions. That is why hidden listings are a separate, weaker tier.
 - **Same building, not same suite.** A building-level match proves the building, not the exact suite.
 - **Medicare-only coverage.** Medicare claims (2024) and PECOS cover only providers who bill Medicare. Commercial-only providers rely on NPPES, DAC and Health Net.
 - **Live data drifts.** The live directory changes over time. The archived 2026-10-18 responses keep results reproducible; a live refresh gives a newer snapshot.
+- **The NLP fallback depends on the environment.** C2's fallback runs only when `sentence-transformers` is installed, so install it (or not) consistently across runs. Reported results use the rule-only path.
 - **QualChoice is missing.** Its in-network file is unavailable from Centene (404). It is out of scope for California.
