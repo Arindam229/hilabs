@@ -504,6 +504,22 @@ If Ollama is offline, the copilot does not fail. It returns the live records plu
 | Qwen 2.5 1.5B Instruct (`qwen2.5:1.5b`) | Answer generation | 1.5B parameters (Ollama ships a quantised build of about 1 GB) | `ollama pull qwen2.5:1.5b` · [Ollama library](https://ollama.com/library/qwen2.5) · [Hugging Face](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) · **Team mirror: _link to be added_** |
 | all-MiniLM-L6-v2 | Retrieval embeddings, plus the C2 `nlp_score` | 22M parameters, 384-dim (about 90 MB) | Downloaded automatically by sentence-transformers on first use · [Hugging Face](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) · **Team mirror: _link to be added_** |
 
+**What Ollama downloads for `qwen2.5:1.5b`** (from the registry manifest, fetched 2026-10-18):
+
+| Item | Value |
+|---|---|
+| Library page | https://ollama.com/library/qwen2.5:1.5b |
+| Manifest | `https://registry.ollama.ai/v2/library/qwen2.5/manifests/1.5b` |
+| Model weights (GGUF) | `https://registry.ollama.ai/v2/library/qwen2.5/blobs/sha256:183715c435899236895da3869489cc30ac241476b4971a20285b1a462818a5b4`: **986,048,512 bytes (≈ 986 MB)** |
+| Chat template | `sha256:eb4402837c7829a690fa845de4d7f3fd842c2adee476d5341da8a46ea9255175` (1,482 bytes) |
+| Default system prompt | `sha256:66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e` (68 bytes) |
+| Licence | `sha256:832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e` (11,343 bytes) |
+| Model config | `sha256:377ac4d7aeefd5b870c9fccff9a6d4df36901d99fe3277c2f755bc401601ba1c` |
+| Local API used by the copilot | `http://127.0.0.1:11434`: `GET /api/tags` (installed models), `POST /api/generate` (answers) |
+| Stored on disk | `~/.ollama/models/` (`/usr/share/ollama/.ollama/models/` for the Linux system service) |
+
+The embedding model `all-MiniLM-L6-v2` is downloaded by sentence-transformers from https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2 on first use, and cached in `~/.cache/huggingface/`.
+
 **Running the copilot and dashboard (optional):**
 
 ```bash
