@@ -36,6 +36,7 @@ C5_COLUMNS = [
     "Address_Score", "Address_Verification_Status",
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
     "Geocode_Status", "Latitude", "Longitude", "Nearest_TIN_Site_Distance_Km", "Geo_Score", "Geo_Anomaly_Flag",
+    "TIN_Modal_ZIP3", "TIN_Support_Score",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code",
     "Specialty_Source", "Specialty_Status", "Negotiated_Type", "Billing_Class",
     "Setting", "Service_Code", "Modifiers", "Source_File", "Selection_Rule",
@@ -48,7 +49,7 @@ CANDIDATE_COLUMNS = [
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code", "CMS_Specialty",
     "Alternative_Addresses", "Geocode_Status", "Latitude", "Longitude",
-    "Nearest_TIN_Site_Distance_Km", "Geo_Score", "Geo_Anomaly_Flag",
+    "Nearest_TIN_Site_Distance_Km", "Geo_Score", "Geo_Anomaly_Flag", "TIN_Modal_ZIP3", "TIN_Support_Score",
 ]
 
 AUDIT_COLUMNS = [
@@ -276,6 +277,45 @@ def score_address_candidate(candidate: dict[str, Any], geo_score: int = 0) -> tu
     return score, verification
 
 
+def _zip3(address: str) -> str:
+    match = re.search(r"\b(\d{5})\b", address or "")
+    return match.group(1)[:3] if match else ""
+
+
+def _build_tin_profiles(
+    pair_candidates: dict[tuple[str, str], tuple[dict[str, dict[str, Any]], str]],
+) -> dict[str, dict[str, Any]]:
+    """Build weak TIN geography from independently strong NPI address evidence."""
+    profiles: dict[str, dict[str, Any]] = {}
+    for (npi, tin), (groups, _) in pair_candidates.items():
+        profile = profiles.setdefault(tin, {"zip3_npis": {}, "address_npis": {}})
+        for norm, group in groups.items():
+            base_score, _ = score_address_candidate(group)
+            if base_score < 60:
+                continue
+            zip3 = _zip3(norm or group.get("orig", ""))
+            if zip3:
+                profile["zip3_npis"].setdefault(zip3, set()).add(npi)
+            if norm:
+                profile["address_npis"].setdefault(norm, set()).add(npi)
+    for profile in profiles.values():
+        profile["modal_zip3"] = max(
+            profile["zip3_npis"],
+            key=lambda value: (len(profile["zip3_npis"][value]), value),
+            default="",
+        )
+    return profiles
+
+
+def _tin_geographic_support(profile: dict[str, Any], npi: str, norm: str) -> tuple[int, str, str, int]:
+    zip3 = _zip3(norm)
+    zip_score = 10 if zip3 and zip3 == profile.get("modal_zip3") else 0
+    address_count = len(profile.get("address_npis", {}).get(norm, set()))
+    reuse_score = 15 if address_count >= 2 else 0
+    support = min(20, zip_score + reuse_score)
+    return support, "SUPPORTED" if support else "UNVERIFIED", profile.get("modal_zip3", ""), address_count
+
+
 def _apply_geospatial_support(
     pair_candidates: dict[tuple[str, str], tuple[dict[str, dict[str, Any]], str]],
     cache_path: Path,
@@ -287,6 +327,7 @@ def _apply_geospatial_support(
     except (OSError, ValueError):
         cache = {}
     cache_before = len(cache)
+    profiles = _build_tin_profiles(pair_candidates)
     trusted_by_tin: dict[str, list[tuple[str, float, float]]] = {}
     candidates = []
 
@@ -296,6 +337,13 @@ def _apply_geospatial_support(
             group["geo"] = geo
             group["geo_score"] = 0
             group["geo_flag"] = "not_measured"
+            tin_support, tin_status, modal_zip3, address_count = _tin_geographic_support(
+                profiles.get(tin, {}), npi, norm
+            )
+            group["tin_support_score"] = tin_support
+            group["tin_link_status"] = tin_status
+            group["tin_modal_zip3"] = modal_zip3
+            group["tin_address_npi_count"] = address_count
             candidates.append((npi, tin, norm, group))
             base_score, _ = score_address_candidate(group)
             if base_score >= 60 and geo["latitude"] is not None:
@@ -303,6 +351,7 @@ def _apply_geospatial_support(
 
     for npi, tin, _, group in candidates:
         geo = group["geo"]
+        group["support_score"] = int(group.get("tin_support_score", 0))
         if geo["latitude"] is None:
             continue
         distances = [
@@ -315,6 +364,7 @@ def _apply_geospatial_support(
         group["nearest_tin_site_distance_km"] = distance
         group["geo_score"] = geo_score
         group["geo_flag"] = geo_flag
+        group["support_score"] += geo_score
 
     if enabled:
         cache_path.write_text(json.dumps(cache, sort_keys=True) + "\n")
@@ -323,6 +373,8 @@ def _apply_geospatial_support(
         "enabled": enabled,
         "candidates": len(candidates),
         "matched": matches,
+        "profiles": len(profiles),
+        "supported_candidates": sum(1 for *_, group in candidates if group.get("tin_link_status") == "SUPPORTED"),
         "cache_entries_before": cache_before,
         "cached_addresses": len(cache),
     }
@@ -709,8 +761,12 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         elif status == "UNRESOLVED":
             unresolved += 1
 
-    unverified_tin = len(candidate_keys)
     geocode_stats = _apply_geospatial_support(pair_candidates, out_dir / "census_geocode_cache.json")
+    supported_tin = sum(
+        any(group.get("tin_link_status") == "SUPPORTED" for group in groups.values())
+        for groups, _ in pair_candidates.values()
+    )
+    unverified_tin = len(candidate_keys) - supported_tin
 
     for (npi, tin), business_name in candidate_keys.items():
         addr_groups, status = pair_candidates[(npi, tin)]
@@ -721,7 +777,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
             families = group.get("families", set())
             orig_addr = group.get("orig", "")
             geo = group.get("geo", {"status": "not_attempted", "latitude": None, "longitude": None})
-            score, verification = score_address_candidate(group, int(group.get("geo_score", 0)))
+            score, verification = score_address_candidate(group, int(group.get("support_score", 0)))
             tier = "Tier 4" if not norm else "Tier 2" if len(families) >= 2 else "Tier 3" if _is_complete_address(orig_addr) else "Tier 4"
             pwriter.writerow({
                 "NPI": npi, "TIN": tin, "TIN_Business_Name": business_name,
@@ -732,12 +788,14 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Address_Verification_Status": verification, "Address_Record_Updated_At": group.get("updated", ""),
                 "Address_Role": _address_role(orig_addr) if norm else "unknown", "Address_Evidence_Tier": tier,
                 "Match_Method": "exact_npi_tin" if _valid_npi(npi) else "invalid_npi",
-                "TIN_Address_Link_Status": "UNVERIFIED", "Taxonomy_Code": group.get("taxonomy", ""),
+                "TIN_Address_Link_Status": group.get("tin_link_status", "UNVERIFIED"), "Taxonomy_Code": group.get("taxonomy", ""),
                 "CMS_Specialty": group.get("cms_specialty", ""),
                 "Alternative_Addresses": "; ".join(other for other in candidate_norms if other != norm),
                 "Geocode_Status": geo["status"], "Latitude": geo["latitude"], "Longitude": geo["longitude"],
                 "Nearest_TIN_Site_Distance_Km": group.get("nearest_tin_site_distance_km"),
                 "Geo_Score": group.get("geo_score", 0), "Geo_Anomaly_Flag": group.get("geo_flag", "not_measured"),
+                "TIN_Modal_ZIP3": group.get("tin_modal_zip3", ""),
+                "TIN_Support_Score": group.get("tin_support_score", 0),
             })
 
     for idx, c4r in enumerate(c4_rows):
@@ -787,6 +845,9 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 geo_score = 0
                 geo_flag = "not_measured"
                 nearest_tin_site_distance_km = None
+                tin_support_score = 0
+                tin_modal_zip3 = ""
+                tin_link = "UNVERIFIED"
             else:
                 g = addr_groups[norm]
                 orig_addr = g["orig"]
@@ -808,7 +869,10 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 geo_score = int(g.get("geo_score", 0))
                 geo_flag = g.get("geo_flag", "not_measured")
                 nearest_tin_site_distance_km = g.get("nearest_tin_site_distance_km")
-                score, verification = score_address_candidate(g, geo_score)
+                tin_support_score = int(g.get("tin_support_score", 0))
+                tin_modal_zip3 = g.get("tin_modal_zip3", "")
+                tin_link = g.get("tin_link_status", "UNVERIFIED")
+                score, verification = score_address_candidate(g, int(g.get("support_score", geo_score)))
 
             # specialty
             nucc_spec = _nucc_specialty(tax_code, nucc)
@@ -862,8 +926,6 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
             if status == "CONFLICTING":
                 addr_status = "CONFLICTING"
 
-            tin_link = "UNVERIFIED"
-
             out_row = {
                 "NPI": npi,
                 "TIN": tin,
@@ -889,6 +951,8 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Match_Method": "exact_npi" if _valid_npi(npi) else "invalid_npi",
                 "Confidence_or_Evidence_Level": "HIGH" if addr_status == "CORROBORATED" else "MEDIUM" if addr_status == "SINGLE_SOURCE" else "LOW" if addr_status == "CONFLICTING" else "NONE",
                 "TIN_Address_Link_Status": tin_link,
+                "TIN_Modal_ZIP3": tin_modal_zip3,
+                "TIN_Support_Score": tin_support_score,
                 "Taxonomy_Code": tax_code,
                 "Specialty_Source": spec_source,
                 "Specialty_Status": spec_status,
@@ -962,6 +1026,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
         "unresolved": unresolved,
         "invalid_npi_count": invalid_npi_count,
         "unverified_tin_address_links": unverified_tin,
+        "supported_tin_address_links": supported_tin,
         "duplicate_four_key_rows": four_key_dup,
         "specialty_mapped": specialty_mapped,
         "specialty_unmapped": specialty_unmapped,

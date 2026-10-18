@@ -3,10 +3,12 @@ from pathlib import Path
 import pytest
 
 from pipeline.stages.c5_address import (
+    _build_tin_profiles,
     _haversine_km,
     _npd_location_records,
     _npd_npis_to_fetch,
     _resolve_address_candidates,
+    _tin_geographic_support,
     c4_candidate_keys,
     score_address_candidate,
 )
@@ -101,6 +103,22 @@ def test_c5_geography_cannot_upgrade_candidate_to_verified():
     }
 
     assert score_address_candidate(candidate, geo_score=10) == (60, "PROBABLE")
+
+
+def test_c5_tin_profile_supports_modal_zip_and_reused_site_without_proving_ownership():
+    pairs = {
+        ("1000000001", "11-1111111"): ({
+            "10 MAIN ST LOS ANGELES CA 90001": {"orig": "10 MAIN ST, LOS ANGELES, CA 90001", "sources": {"CMS_DAC", "NPPES"}, "families": {"CMS_DAC", "NPPES"}},
+        }, "SINGLE_SOURCE"),
+        ("1000000002", "11-1111111"): ({
+            "10 MAIN ST LOS ANGELES CA 90001": {"orig": "10 MAIN ST, LOS ANGELES, CA 90001", "sources": {"CMS_NPD_LOCATION"}, "families": {"CMS_NPD_LOCATION"}},
+        }, "SINGLE_SOURCE"),
+    }
+
+    profiles = _build_tin_profiles(pairs)
+    support = _tin_geographic_support(profiles["11-1111111"], "1000000001", "10 MAIN ST LOS ANGELES CA 90001")
+
+    assert support == (20, "SUPPORTED", "900", 2)
 
 
 def test_c6_selects_highest_scored_address_before_source_tier():
