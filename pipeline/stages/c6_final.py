@@ -33,6 +33,10 @@ def _source_count(src: str) -> int:
     return len([x for x in (src or "").split(";") if x.strip()])
 
 
+def _c5_summary_path(c5_path: Path) -> Path:
+    return c5_path.parent / "c5_summary.json"
+
+
 def _select_canonical(group_rows: list[dict[str, str]]) -> tuple[dict[str, str], str, str, list[str]]:
     """Return (selected_row, status, reason, alternatives)."""
     # dedup by normalized address
@@ -162,7 +166,7 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
             w.writerow(r)
 
     # summary
-    summary_path = cfg.stage_dir("c5") / "c5_summary.json"
+    summary_path = _c5_summary_path(c5_path)
     summary = {}
     if summary_path.is_file():
         summary = json.loads(summary_path.read_text())
@@ -211,7 +215,7 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
     audit.append(["Candidate key", "(NPI, TIN, Address)"])
     audit.append(["Rate join", "C4 rates attach to C5 candidates on (NPI, TIN)"])
     audit.append(["Selection", "one canonical address per (NPI, TIN, Billing Code)"])
-    audit.append(["API", "Unavailable"])
+    audit.append(["API", json.dumps(summary.get("api_status", "not used"), sort_keys=True)])
     for c in audit[1]:
         c.font = Font(bold=True)
 

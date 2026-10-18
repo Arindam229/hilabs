@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from pipeline.stages.c5_address import (
     _npd_location_records,
     _npd_npis_to_fetch,
@@ -5,7 +7,7 @@ from pipeline.stages.c5_address import (
     c4_candidate_keys,
     score_address_candidate,
 )
-from pipeline.stages.c6_final import _select_canonical
+from pipeline.stages.c6_final import _c5_summary_path, _select_canonical
 
 
 def test_c5_candidate_key_is_npi_and_tin_not_billing_code():
@@ -133,3 +135,9 @@ def test_c5_api_queue_skips_cached_npis(tmp_path):
     assert _npd_npis_to_fetch(
         {"1000000001", "1000000002", "1000000003"}, tmp_path, 2
     ) == ["1000000002", "1000000003"]
+
+
+def test_c6_reads_summary_next_to_supplied_c5_result():
+    assert _c5_summary_path(Path("data/stage/c5_npd_full_run/c5result.csv")) == Path(
+        "data/stage/c5_npd_full_run/c5_summary.json"
+    )
