@@ -4,6 +4,7 @@ import { useState, useEffect, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
+import { PipelineCopilot } from "./PipelineCopilot";
 import { PipelineStage } from "@/lib/types";
 
 interface DashboardLayoutProps {
@@ -60,7 +61,6 @@ export function DashboardLayout({
       <Sidebar
         isCollapsed={isSidebarCollapsed || isMobile}
         onToggle={toggleSidebar}
-        pipelineStatus={pipelineStages}
       />
 
       {/* Main Content */}
@@ -86,6 +86,9 @@ export function DashboardLayout({
           {children}
         </main>
       </div>
+
+      {/* Floating Pipeline Copilot Assistant */}
+      <PipelineCopilot />
 
       {/* Mobile Bottom Navigation */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background">

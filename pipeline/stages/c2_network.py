@@ -22,7 +22,7 @@ from openpyxl import Workbook
 
 from pipeline.config import Config
 from pipeline.io.manifest import write_manifest
-from pipeline.stages.c1_index import PLAN_COLUMNS, StageResult, _write_parquet
+from pipeline.stages.c1_index import PLAN_COLUMNS, StageResult, _write_csv, _write_parquet
 
 NETWORK_COLUMNS = PLAN_COLUMNS + ("network_type", "reason_code", "confidence", "confidence_score", "nlp_score")
 RATE_FILE_COLUMNS = (
@@ -203,10 +203,14 @@ def run_c2(cfg: Config) -> StageResult:
     stage_dir = cfg.stage_dir("c2")
     stage_dir.mkdir(parents=True, exist_ok=True)
     plan_network_path = stage_dir / "plan_network.parquet"
+    plan_network_csv_path = stage_dir / "plan_network.csv"
     rate_files_path = stage_dir / "rate_files.parquet"
+    rate_files_csv_path = stage_dir / "rate_files.csv"
     excel_path = cfg.data_dir / "out" / "c2_ppo_network.xlsx"
     _write_parquet(plan_network_path, plans, NETWORK_COLUMNS)
+    _write_csv(plan_network_csv_path, plans, NETWORK_COLUMNS)
     _write_parquet(rate_files_path, rate_files, RATE_FILE_COLUMNS)
+    _write_csv(rate_files_csv_path, rate_files, RATE_FILE_COLUMNS)
     _write_excel(excel_path, [row for row in plans if row["network_type"] == "PPO"], rate_files)
     counts = Counter(row["network_type"] for row in plans)
     summary = {
@@ -214,6 +218,26 @@ def run_c2(cfg: Config) -> StageResult:
         "ppo_plans": counts["PPO"],
         "candidate_rate_files": len(rate_files),
     }
+    # Write a JSON summary for downstream/UI consumption.
+    import json as _json
+    type_counts = Counter(row["network_type"] for row in plans)
+    reason_counts = Counter(row["reason_code"] for row in plans)
+    conf_counts = Counter(row["confidence"] for row in plans)
+    nlp_scores = [row.get("nlp_score") for row in plans if row.get("nlp_score") is not None]
+    c2_summary = {
+        "stage": "c2",
+        "plans_classified": len(plans),
+        "ppo_plans": type_counts.get("PPO", 0),
+        "candidate_rate_files": len(rate_files),
+        "network_type_counts": dict(type_counts),
+        "reason_code_counts": dict(reason_counts),
+        "confidence_counts": dict(conf_counts),
+        "nlp_score_min": min(nlp_scores) if nlp_scores else None,
+        "nlp_score_max": max(nlp_scores) if nlp_scores else None,
+        "nlp_score_mean": (sum(nlp_scores) / len(nlp_scores)) if nlp_scores else None,
+    }
+    (stage_dir / "c2_summary.json").write_text(_json.dumps(c2_summary, indent=2, sort_keys=True) + "\n")
+
     manifest_path = stage_dir / "_manifest.json"
     write_manifest(
         manifest_path,
@@ -223,5 +247,5 @@ def run_c2(cfg: Config) -> StageResult:
         counts=summary,
         started_at=started_at,
     )
-    return StageResult("c2", summary, (plan_network_path, rate_files_path, excel_path, manifest_path))
+    return StageResult("c2", summary, (plan_network_path, plan_network_csv_path, rate_files_path, rate_files_csv_path, excel_path, manifest_path))
 

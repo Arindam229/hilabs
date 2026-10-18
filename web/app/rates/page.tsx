@@ -168,21 +168,20 @@ const columns = [
   }),
 ];
 
-const statusOptions = [
-  { value: "corroborated", label: "Corroborated" },
-  { value: "single_source", label: "Single Source" },
-  { value: "conflicting", label: "Conflicting" },
-  { value: "unresolved", label: "Unresolved" },
-];
-
-const billingCodes = ["99213", "99214", "99215", "99203", "99204"];
-const specialties = ["Internal Medicine", "Family Practice", "Cardiology", "Dermatology", "Orthopedics"];
-
 export default function RatesPage() {
   const [data, setData] = useState<RateRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filterOptions, setFilterOptions] = useState<{
+    billingCodes: string[];
+    specialties: string[];
+    addressStatuses: Array<{ value: string; label: string }>;
+  }>({
+    billingCodes: [],
+    specialties: [],
+    addressStatuses: [],
+  });
   const [globalFilter, setGlobalFilter] = useState("");
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -229,6 +228,13 @@ export default function RatesPage() {
   };
 
   useEffect(() => {
+    fetch("/api/rates/options")
+      .then((res) => res.json())
+      .then((opts) => setFilterOptions(opts))
+      .catch((err) => console.error("Failed to load rate filter options:", err));
+  }, []);
+
+  useEffect(() => {
     fetchData();
   }, [globalFilter, columnFilters, sorting, pagination]);
 
@@ -272,6 +278,45 @@ export default function RatesPage() {
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   };
 
+  const handleExportCSV = () => {
+    if (data.length === 0) return;
+    const headers = [
+      "NPI",
+      "TIN",
+      "Address",
+      "Billing Code",
+      "Specialty",
+      "Rate",
+      "Address Status",
+      "Specialty Source",
+      "Selection Rule",
+    ];
+    const rows = data.map((r) => [
+      `"${r.npi}"`,
+      `"${r.tin}"`,
+      `"${(r.address || "").replace(/"/g, '""')}"`,
+      `"${r.billing_code}"`,
+      `"${(r.specialty || "").replace(/"/g, '""')}"`,
+      r.rate,
+      `"${r.address_status}"`,
+      `"${r.specialty_source || ""}"`,
+      `"${r.selection_rule || ""}"`,
+    ]);
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute(
+      "download",
+      `hilabs_rates_export_${new Date().toISOString().slice(0, 10)}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const hasActiveFilters =
     globalFilter || columnFilters.some((f) => f.value !== undefined && f.value !== "");
 
@@ -304,17 +349,14 @@ export default function RatesPage() {
                 />
               </div>
 
-              {/* Column Filters (collapsible) */}
+              {/* Column Visibility Selector (collapsible) */}
               <details className="relative">
-                <summary className="inline-flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground cursor-pointer list-none">
-                  <Filter className="h-4 w-4" />
-                  <span>Filters</span>
-                  {hasActiveFilters && (
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                  )}
+                <summary className="inline-flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground cursor-pointer list-none select-none">
+                  <Columns className="h-4 w-4" />
+                  <span>Columns</span>
                 </summary>
                 <div className="absolute z-50 mt-2 w-80 rounded-md border border-border bg-card p-2 shadow-md">
-                  <div className="px-2 py-1.5 text-sm font-semibold">Column Filters</div>
+                  <div className="px-2 py-1.5 text-sm font-semibold">Display Columns</div>
                   <div className="my-1 h-px bg-border" />
                   {columns.map((col) => {
                     if (!("accessorFn" in col) || !col.id) return null;
@@ -340,25 +382,25 @@ export default function RatesPage() {
                   <button
                     onClick={clearFilters}
                     disabled={!hasActiveFilters}
-                    className="flex w-full items-center gap-2 px-2 py-1.5 text-sm text-red-600 disabled:opacity-50"
+                    className="flex w-full items-center gap-2 px-2 py-1.5 text-sm text-red-600 disabled:opacity-50 cursor-pointer"
                   >
                     <X className="h-4 w-4" />
-                    Clear All Filters
+                    Reset All Filters
                   </button>
                 </div>
               </details>
 
               {/* Address Status Filter */}
               <Select
-                value={columnFilters.find((f) => f.id === "address_status")?.value as string || ""}
-                onValueChange={(value) => handleColumnFilterChange("address_status", value || undefined)}
+                value={(columnFilters.find((f) => f.id === "address_status")?.value as string) || "all"}
+                onValueChange={(value) => handleColumnFilterChange("address_status", value === "all" ? undefined : value)}
               >
                 <SelectTrigger className="h-9 w-[180px]">
                   <SelectValue placeholder="Address Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All</SelectItem>
-                  {statusOptions.map((opt) => (
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  {(filterOptions.addressStatuses || []).map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>
                       {opt.label}
                     </SelectItem>
@@ -368,17 +410,17 @@ export default function RatesPage() {
 
               {/* Billing Code Filter */}
               <Select
-                value={columnFilters.find((f) => f.id === "billing_code")?.value as string || ""}
-                onValueChange={(value) => handleColumnFilterChange("billing_code", value || undefined)}
+                value={(columnFilters.find((f) => f.id === "billing_code")?.value as string) || "all"}
+                onValueChange={(value) => handleColumnFilterChange("billing_code", value === "all" ? undefined : value)}
               >
-                <SelectTrigger className="h-9 w-[150px]">
+                <SelectTrigger className="h-9 w-[170px]">
                   <SelectValue placeholder="Billing Code" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All</SelectItem>
-                  {billingCodes.map((code) => (
+                  <SelectItem value="all">All Billing Codes</SelectItem>
+                  {(filterOptions.billingCodes || []).map((code) => (
                     <SelectItem key={code} value={code}>
-                      {code}
+                      Code {code}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -386,15 +428,15 @@ export default function RatesPage() {
 
               {/* Specialty Filter */}
               <Select
-                value={columnFilters.find((f) => f.id === "specialty")?.value as string || ""}
-                onValueChange={(value) => handleColumnFilterChange("specialty", value || undefined)}
+                value={(columnFilters.find((f) => f.id === "specialty")?.value as string) || "all"}
+                onValueChange={(value) => handleColumnFilterChange("specialty", value === "all" ? undefined : value)}
               >
-                <SelectTrigger className="h-9 w-[200px]">
+                <SelectTrigger className="h-9 w-[220px]">
                   <SelectValue placeholder="Specialty" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All</SelectItem>
-                  {specialties.map((spec) => (
+                  <SelectItem value="all">All Specialties</SelectItem>
+                  {(filterOptions.specialties || []).map((spec) => (
                     <SelectItem key={spec} value={spec}>
                       {spec}
                     </SelectItem>
@@ -405,7 +447,12 @@ export default function RatesPage() {
               <div className="flex-1" />
 
               {/* Export Button */}
-              <Button variant="outline" className="h-9 gap-2" disabled={loading}>
+              <Button
+                variant="outline"
+                className="h-9 gap-2 cursor-pointer select-none"
+                disabled={loading || data.length === 0}
+                onClick={handleExportCSV}
+              >
                 <Download className="h-4 w-4" />
                 Export CSV
               </Button>

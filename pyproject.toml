@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Streaming Centene provider-rate curation pipeline"
 requires-python = ">=3.11"
 dependencies = [
+  "duckdb>=1.5.6",
   "ijson>=3.3",
   "openpyxl>=3.1",
   "pandas>=2.2",

@@ -79,6 +79,17 @@ Template:
 - **Alternatives rejected:** Re-streaming the same physical rate file for each PPO plan, or showing HMO/EPO/POS records in PPO export.
 - **Confidence / risk:** High for plan-level workbook scope; in-file evidence still controls rate extraction.
 
+### R-C2-08 — NLP semantic similarity evaluated and rejected for plan classification
+- **Rule:** Plan classification must use deterministic cascade (`R-C2-01` to `R-C2-06`), not semantic cosine similarity or unsupervised embeddings.
+- **Why:** Evaluated `SentenceTransformer("all-MiniLM-L6-v2")` cosine similarity against CMS PPO archetype across all 3,274 plans:
+  * Score distribution: ranged from -0.046 to 0.418 (mean 0.121). Exactly zero plans reached $\ge 0.5$.
+  * Over 87% clustered between 0.0 and 0.2. Setting a conventional threshold (e.g. 0.5 or 0.8) would have discarded 100% of authentic PPO plans.
+  * No separable decision boundary exists: out-of-scope plans had an average NLP similarity of 0.153, while genuine PPO plans had an average similarity of only 0.102. Hybrid names (e.g., "Full Network HMO Platinum") scored higher than customized group PPOs ("CA L CUS PPO SACRAMENTO CITY USD").
+  * Supervised logistic regression on embeddings also had intolerable false positive rates on non-PPO benefit designs.
+- **Evidence:** `data/stage/c2/c2_summary.json` (`nlp_score_min: -0.046`, `nlp_score_mean: 0.121`, `nlp_score_max: 0.418`); `scripts/export_c2_nlp.py` histogram; `c2_network.py` NLP evaluation pipeline.
+- **Alternatives rejected:** Thresholding on embedding cosine similarity (misclassifies hundreds of plans); unconstrained LLM zero-shot classification (slow, non-reproducible, hallucination risk on legal contracts).
+- **Confidence / risk:** High. Deterministic rules achieve 100% precision on explicit tokens.
+
 ### R-C4-01 — Stream provider references and in_network separately
 - **Rule:** C4 builds the `provider_group_id` lookup from one streaming pass over
   `provider_references`, then streams `in_network` in a second pass. The full TiC

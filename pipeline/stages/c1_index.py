@@ -141,6 +141,16 @@ def _write_parquet(path: Path, rows: list[dict[str, object]], columns: tuple[str
     pq.write_table(table, path, compression="zstd")
 
 
+def _write_csv(path: Path, rows: list[dict[str, object]], columns: tuple[str, ...]) -> None:
+    """Write rows to CSV with consistent column order."""
+    import csv
+
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(columns), extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def run_c1(cfg: Config) -> StageResult:
     if not cfg.archive.is_file():
         raise FileNotFoundError(
@@ -163,10 +173,14 @@ def run_c1(cfg: Config) -> StageResult:
     rows = _dedupe(rows)
     rate_files = unique_rate_files(rows)
     plans_path = stage_dir / "plans.parquet"
+    plans_csv_path = stage_dir / "plans.csv"
     rate_files_path = stage_dir / "rate_files.parquet"
+    rate_files_csv_path = stage_dir / "rate_files.csv"
     manifest_path = stage_dir / "_manifest.json"
     _write_parquet(plans_path, rows, PLAN_COLUMNS)
+    _write_csv(plans_csv_path, rows, PLAN_COLUMNS)
     _write_parquet(rate_files_path, rate_files, RATE_FILE_COLUMNS)
+    _write_csv(rate_files_csv_path, rate_files, RATE_FILE_COLUMNS)
     write_manifest(
         manifest_path,
         stage="c1",
@@ -175,4 +189,4 @@ def run_c1(cfg: Config) -> StageResult:
         counts={"plan_file_rows": len(rows), "unique_rate_files": len(rate_files)},
         started_at=started_at,
     )
-    return StageResult("c1", {"plan_file_rows": len(rows), "unique_rate_files": len(rate_files)}, (plans_path, rate_files_path, manifest_path))
+    return StageResult("c1", {"plan_file_rows": len(rows), "unique_rate_files": len(rate_files)}, (plans_path, plans_csv_path, rate_files_path, rate_files_csv_path, manifest_path))

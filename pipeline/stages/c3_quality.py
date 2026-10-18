@@ -943,6 +943,8 @@ def run_c3(cfg: Config) -> StageResult:
         for row in rows
     )
     report_path.write_text("\n".join(lines) + "\n")
+    if rows:
+        (stage_dir / "c3_summary.json").write_text(json.dumps(rows[0], indent=2, default=str) + "\n")
     manifest_path = stage_dir / "_manifest.json"
     write_manifest(
         manifest_path,
