@@ -423,7 +423,7 @@ cd web && npm install && npm run dev          # Next.js dashboard (overview, rat
 
 | # | PS deliverable | Where |
 |---|---|---|
-| 1 | Rate file (NPI, TIN, Address, Billing Code, Specialty, Rate) | `data/out/final_provider_rates.xlsx` |
+| 1 | Rate file (NPI, TIN, Address, Billing Code, Specialty, Rate) | `data/out/final_provider_rates.xlsx` (+ the same rows as `final_provider_rates.csv`) |
 | 2 | Logic file (PPO network; TIN → NPI → address) | §7 above · `docs/DECISIONS.md` (every rule ID with evidence) |
 | 3 | File quality metrics | `docs/deliverables/file_quality_metrics.md` · `data/stage/c3/file_metrics.parquet` |
 | 4 | Summary metrics | §1 above · `data/stage/*/_manifest.json` |
