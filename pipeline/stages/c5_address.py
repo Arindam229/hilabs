@@ -11,6 +11,7 @@ import time
 import urllib.parse
 import urllib.request
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 
 try:
@@ -436,42 +437,62 @@ def _npd_get(path: str, params: dict[str, str]) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
-def _build_cms_npd(npi_set: set[str], cache_dir: Path, max_npis: int) -> tuple[dict[str, list[dict[str, str]]], dict[str, int]]:
+def _npd_npis_to_fetch(npi_set: set[str], cache_dir: Path, max_npis: int) -> list[str]:
+    npis = [npi for npi in sorted(npi_set) if not (cache_dir / f"{npi}.json").is_file()]
+    return npis if max_npis == 0 else npis[:max_npis]
+
+
+def _fetch_npd_payload(npi: str) -> dict[str, Any]:
+    practitioner = _npd_get("Practitioner", {
+        "identifier": f"http://hl7.org/fhir/sid/us-npi|{npi}", "_count": "1",
+    })
+    entries = practitioner.get("entry", [])
+    practitioner_id = _text(entries[0].get("resource", {}).get("id")) if entries else ""
+    roles = _npd_get("PractitionerRole", {
+        "practitioner": f"Practitioner/{practitioner_id}", "active": "true",
+        "_include": "PractitionerRole:location", "_count": "100",
+    }) if practitioner_id else {}
+    return {"practitioner": practitioner, "roles": roles}
+
+
+def _build_cms_npd(npi_set: set[str], cache_dir: Path, max_npis: int, workers: int = 4) -> tuple[dict[str, list[dict[str, str]]], dict[str, int]]:
     """Fetch current CMS NPD locations once per NPI, with resumable raw-response cache."""
     result: dict[str, list[dict[str, str]]] = {npi: [] for npi in npi_set}
     cache_dir.mkdir(parents=True, exist_ok=True)
     stats = {"requested": 0, "cache_hits": 0, "api_success": 0, "api_errors": 0, "location_records": 0}
-    npis = sorted(npi_set)
-    if max_npis > 0:
-        npis = npis[:max_npis]
-    for npi in npis:
+    uncached_npis = _npd_npis_to_fetch(npi_set, cache_dir, max_npis)
+    cached_npis = sorted(npi for npi in npi_set if (cache_dir / f"{npi}.json").is_file())
+    stats["cache_hits"] = len(cached_npis)
+    stats["requested"] = len(uncached_npis)
+
+    def fetch_one(npi: str) -> tuple[str, dict[str, Any] | None]:
+        try:
+            payload = _fetch_npd_payload(npi)
+            (cache_dir / f"{npi}.json").write_text(json.dumps(payload), encoding="utf-8")
+            time.sleep(0.1)
+            return npi, payload
+        except (OSError, ValueError, TimeoutError):
+            return npi, None
+
+    fetched: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+        futures = [executor.submit(fetch_one, npi) for npi in uncached_npis]
+        for future in as_completed(futures):
+            npi, payload = future.result()
+            if payload is None:
+                stats["api_errors"] += 1
+            else:
+                fetched[npi] = payload
+                stats["api_success"] += 1
+
+    for npi in cached_npis + uncached_npis:
         cache_path = cache_dir / f"{npi}.json"
-        payload: dict[str, Any]
-        if cache_path.is_file():
+        payload = fetched.get(npi, {})
+        if not payload and cache_path.is_file():
             try:
                 payload = json.loads(cache_path.read_text(encoding="utf-8"))
-                stats["cache_hits"] += 1
             except (OSError, ValueError):
                 payload = {}
-        else:
-            stats["requested"] += 1
-            try:
-                practitioner = _npd_get("Practitioner", {
-                    "identifier": f"http://hl7.org/fhir/sid/us-npi|{npi}", "_count": "1",
-                })
-                entries = practitioner.get("entry", [])
-                practitioner_id = _text(entries[0].get("resource", {}).get("id")) if entries else ""
-                roles = _npd_get("PractitionerRole", {
-                    "practitioner": f"Practitioner/{practitioner_id}", "active": "true",
-                    "_include": "PractitionerRole:location", "_count": "100",
-                }) if practitioner_id else {}
-                payload = {"practitioner": practitioner, "roles": roles}
-                cache_path.write_text(json.dumps(payload), encoding="utf-8")
-                stats["api_success"] += 1
-                time.sleep(0.05)
-            except (OSError, ValueError, TimeoutError):
-                payload = {}
-                stats["api_errors"] += 1
         records = _npd_location_records(payload.get("roles", {}))
         result[npi] = records
         stats["location_records"] += len(records)
@@ -526,7 +547,11 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
             max_npis = int(os.environ.get("PTD_NPD_MAX_NPIS", "100"))
         except ValueError:
             max_npis = 100
-        npd_map, npd_stats = _build_cms_npd(npi_set, out_dir / "cms_npd_cache", max_npis)
+        try:
+            npd_workers = int(os.environ.get("PTD_NPD_WORKERS", "4"))
+        except ValueError:
+            npd_workers = 4
+        npd_map, npd_stats = _build_cms_npd(npi_set, out_dir / "cms_npd_cache", max_npis, npd_workers)
         npd_stats["enabled"] = True
 
     # outputs

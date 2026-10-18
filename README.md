@@ -179,6 +179,8 @@ PTD_NPD_API=1 PTD_NPD_MAX_NPIS=100 make c5
 
 Set `PTD_NPD_MAX_NPIS=0` only for all NPIs. NPD requests remain opt-in; this
 avoids an uncontrolled public-API run during normal reproducible pipeline runs.
+Use `PTD_NPD_WORKERS=4` (default) for bounded concurrent requests; cached NPIs
+are never requested again on later runs.
 
 ## Repository layout
 

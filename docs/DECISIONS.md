@@ -187,7 +187,7 @@ Template:
 - **Confidence / risk:** Medium. CMS DAC supports active provider-location evidence; C4 supports NPI-to-TIN. Neither source alone proves exact TIN-to-street ownership.
 
 ### R-C5-03 — CMS National Provider Directory is opt-in, cached location evidence
-- **Rule:** When `PTD_NPD_API=1`, C5 queries CMS FHIR `Practitioner` by NPI, then active `PractitionerRole` records with included `Location` resources. California physical locations score `+60`. Raw responses cache per NPI and `PTD_NPD_MAX_NPIS` defaults to `100`; `0` requests all NPIs.
+- **Rule:** When `PTD_NPD_API=1`, C5 queries CMS FHIR `Practitioner` by NPI, then active `PractitionerRole` records with included `Location` resources. California physical locations score `+60`. Raw responses cache per NPI; later runs request only uncached NPIs. `PTD_NPD_MAX_NPIS` defaults to `100`; `0` requests all remaining NPIs. `PTD_NPD_WORKERS` defaults to `4`.
 - **Why:** Current directory locations can strengthen stale NPPES/DAC evidence, but thousands of public API calls must be resumable and deliberate.
 - **Evidence:** `tests/test_c5_candidate_keys.py` parses CMS FHIR Location address data. One live API check returned a valid FHIR response and location references.
 - **Alternatives rejected:** Calling public API once per C4 rate row; treating NPD provider data as proof of TIN-to-street ownership.

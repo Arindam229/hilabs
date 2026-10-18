@@ -1,5 +1,6 @@
 from pipeline.stages.c5_address import (
     _npd_location_records,
+    _npd_npis_to_fetch,
     _resolve_address_candidates,
     c4_candidate_keys,
     score_address_candidate,
@@ -124,3 +125,11 @@ def test_c5_extracts_active_cms_directory_location_address():
         "updated": "2026-10-17T12:00:00Z",
         "cms_specialty": "",
     }]
+
+
+def test_c5_api_queue_skips_cached_npis(tmp_path):
+    (tmp_path / "1000000001.json").write_text("{}")
+
+    assert _npd_npis_to_fetch(
+        {"1000000001", "1000000002", "1000000003"}, tmp_path, 2
+    ) == ["1000000002", "1000000003"]
