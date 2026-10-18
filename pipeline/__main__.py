@@ -10,7 +10,7 @@ from pipeline.stages.c1_index import run_c1
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m pipeline")
-    parser.add_argument("stage", choices=("c1", "c2", "c4", "c5", "c6", "all"))
+    parser.add_argument("stage", choices=("c1", "c2", "c3", "c4", "c5", "c6", "all"))
     parser.add_argument("--rate-file", dest="rate_file", default=None)
     parser.add_argument("--rate-member", dest="rate_member", default=None)
     parser.add_argument("--output-dir", dest="output_dir", default=None)
@@ -18,13 +18,19 @@ def main() -> None:
     parser.add_argument("--c5-path", dest="c5_path", default=None)
     args = parser.parse_args()
     cfg = load_config()
-    if args.stage in {"c1", "c2", "all"}:
+    c4_uses_c2_queue = args.stage == "c4" and not (args.rate_file or cfg.rate_file)
+    if args.stage in {"c1", "c2", "c3", "all"} or c4_uses_c2_queue:
         result = run_c1(cfg)
         print(f"{result.stage}: {result.counts}")
-    if args.stage in {"c2", "all"}:
+    if args.stage in {"c2", "c3", "all"} or c4_uses_c2_queue:
         from pipeline.stages.c2_network import run_c2
 
         result = run_c2(cfg)
+        print(f"{result.stage}: {result.counts}")
+    if args.stage in {"c3", "all"} or c4_uses_c2_queue:
+        from pipeline.stages.c3_quality import run_c3
+
+        result = run_c3(cfg)
         print(f"{result.stage}: {result.counts}")
     if args.stage in {"c4", "all"}:
         from pipeline.stages.c4_rates import run_c4
