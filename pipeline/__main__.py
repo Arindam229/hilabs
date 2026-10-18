@@ -10,7 +10,7 @@ from pipeline.stages.c1_index import run_c1
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m pipeline")
-    parser.add_argument("stage", choices=("c1", "c2", "c3", "c4", "c5hn", "c5", "c6", "c7", "all"))
+    parser.add_argument("stage", choices=("c1", "c2", "c3", "c4", "c5hn", "c5", "c6", "c7", "rag", "all"))
     parser.add_argument("--rate-file", dest="rate_file", default=None)
     parser.add_argument("--rate-member", dest="rate_member", default=None)
     parser.add_argument("--output-dir", dest="output_dir", default=None)
@@ -41,7 +41,7 @@ def main() -> None:
         from pipeline.stages.c5_healthnet import run_c5_healthnet
 
         print(f"c5hn: {run_c5_healthnet(cfg, offline=True, verbose=False)}")
-    if args.stage in {"c5"}:
+    if args.stage in {"c5", "all"}:
         from pathlib import Path
 
         from pipeline.stages.c5_address import run_c5
@@ -50,7 +50,7 @@ def main() -> None:
         out = Path(args.output_dir) if args.output_dir else None
         result = run_c5(cfg, c4_path=c4p, output_dir=out)
         print(f"{result.stage}: {result.counts}")
-    if args.stage in {"c6"}:
+    if args.stage in {"c6", "all"}:
         from pathlib import Path
 
         from pipeline.stages.c6_final import run_c6
@@ -58,11 +58,17 @@ def main() -> None:
         c5p = Path(args.c5_path) if args.c5_path else None
         result = run_c6(cfg, c5_path=c5p)
         print(f"{result.stage}: {result.counts}")
-    if args.stage in {"c7"}:
+    if args.stage in {"c7", "all"}:
         from pipeline.stages.c7 import run_c7
 
         result = run_c7(cfg)
         print(f"{result.stage}: {result.counts}")
+    if args.stage in {"rag", "all"}:
+        from pipeline.rag.indexer import build_or_load_index
+
+        print("Syncing RAG index with latest pipeline data...")
+        chunks, embeddings = build_or_load_index(force_rebuild=True)
+        print(f"rag: indexed {len(chunks)} chunks with embedding shape {embeddings.shape}")
 
 
 if __name__ == "__main__":

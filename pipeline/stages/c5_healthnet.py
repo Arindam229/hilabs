@@ -465,7 +465,7 @@ def _safe_lookup(*args: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         if isinstance(e, urllib.error.HTTPError):
             try:
                 detail += " | " + e.read()[:200].decode(errors="replace")
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
         return [], {"NPI": args[1], "Entity_Type": args[2].get("Entity_Type", ""), "HN_Status": "ERROR",
                     "HN_Rule": "", "HN_Matched_Address": detail[:300]}
