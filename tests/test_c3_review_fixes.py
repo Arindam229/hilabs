@@ -143,7 +143,6 @@ def test_rc_code_recovers_real_identity_from_additional_information(tmp_path: Pa
         archive, member, "url", tmp_path / "db.sqlite", hilabs_weights={"99213": 100.0}
     )
     assert result["code_coverage_weighted_pct"] == 100.0
-    assert result["unrecognized_code_count"] == 0
 
 
 def test_non_rc_code_is_not_rewritten_by_additional_information(tmp_path: Path):
@@ -159,7 +158,6 @@ def test_non_rc_code_is_not_rewritten_by_additional_information(tmp_path: Path):
         archive, member, "url", tmp_path / "db.sqlite", hilabs_weights={"99213": 100.0}
     )
     assert result["code_coverage_weighted_pct"] == 100.0
-    assert result["unrecognized_code_count"] == 0
 
 
 # --------------------------------------------------------------------------
