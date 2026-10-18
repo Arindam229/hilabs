@@ -6,8 +6,9 @@ export PTD_C4_OUTPUT_DIR
 
 C4_SELECTED = $(PTD_C4_OUTPUT_DIR)/selected_rates.csv
 C5_RESULT = $(PTD_DATA_DIR)/stage/c5/c5result.csv
+C6_RESULT = $(PTD_DATA_DIR)/out/final_provider_rates.xlsx
 
-.PHONY: setup test c1 c2 c3 c4 c5 c6 pipeline
+.PHONY: setup test c1 c2 c3 c4 c5 c6 c7 pipeline
 
 setup:
 	uv sync --all-groups
@@ -40,4 +41,10 @@ $(C5_RESULT):
 c6: $(C5_RESULT)
 	uv run python -m pipeline c6
 
-pipeline: c1 c2 c3 c4 c5 c6
+$(C6_RESULT):
+	$(MAKE) c6
+
+c7: $(C6_RESULT)
+	uv run python -m pipeline c7
+
+pipeline: c1 c2 c3 c4 c5 c6 c7

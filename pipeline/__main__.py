@@ -10,7 +10,7 @@ from pipeline.stages.c1_index import run_c1
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m pipeline")
-    parser.add_argument("stage", choices=("c1", "c2", "c3", "c4", "c5", "c6", "all"))
+    parser.add_argument("stage", choices=("c1", "c2", "c3", "c4", "c5", "c6", "c7", "all"))
     parser.add_argument("--rate-file", dest="rate_file", default=None)
     parser.add_argument("--rate-member", dest="rate_member", default=None)
     parser.add_argument("--output-dir", dest="output_dir", default=None)
@@ -53,6 +53,11 @@ def main() -> None:
 
         c5p = Path(args.c5_path) if args.c5_path else None
         result = run_c6(cfg, c5_path=c5p)
+        print(f"{result.stage}: {result.counts}")
+    if args.stage in {"c7"}:
+        from pipeline.stages.c7 import run_c7
+
+        result = run_c7(cfg)
         print(f"{result.stage}: {result.counts}")
 
 
