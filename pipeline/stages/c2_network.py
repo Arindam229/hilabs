@@ -4,6 +4,15 @@ from __future__ import annotations
 
 import re
 import time
+
+try:
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+    _HAS_ST = True
+except (ImportError, OSError):
+    _HAS_ST = False
+    SentenceTransformer = None
+    np = None
 from collections import Counter, defaultdict
 from collections.abc import Mapping
 from pathlib import Path
@@ -15,7 +24,7 @@ from pipeline.config import Config
 from pipeline.io.manifest import write_manifest
 from pipeline.stages.c1_index import PLAN_COLUMNS, StageResult, _write_parquet
 
-NETWORK_COLUMNS = PLAN_COLUMNS + ("network_type", "reason_code", "confidence")
+NETWORK_COLUMNS = PLAN_COLUMNS + ("network_type", "reason_code", "confidence", "confidence_score", "nlp_score")
 RATE_FILE_COLUMNS = (
     "rate_file_url",
     "associated_ppo_plan_count",
@@ -39,21 +48,47 @@ def _is_california(row: Mapping[str, str]) -> bool:
     return bool(re.search(r"\d{5}CA\d", plan_id)) or plan_name.startswith(("CA ", "CALCHOICE")) or "_ca_" in url
 
 
-def classify_plan(row: Mapping[str, str]) -> dict[str, str]:
+
+
+_PPO_ARCHETYPE = "Open network preferred provider organization with out of network benefits"
+_ST_MODEL = None
+
+
+def _semantic_ppo_score(plan_name: str) -> float | None:
+    global _ST_MODEL
+    if not _HAS_ST:
+        return None
+    try:
+        if _ST_MODEL is None:
+            _ST_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+        from sentence_transformers import util
+
+        emb = _ST_MODEL.encode([plan_name, _PPO_ARCHETYPE], convert_to_tensor=True, normalize_embeddings=True)
+        return float(util.cos_sim(emb[0], emb[1]).item())
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[str, str]:
     """Classify plan only; rate membership needs C2 in-file evidence."""
     classified = dict(row)
     plan_name = classified.get("plan_name", "")
+    nlp_score = _semantic_ppo_score(plan_name) if (use_embeddings and _HAS_ST) else None
     if classified.get("market_type", "").lower() != "group":
         return classified | {
             "network_type": "OUT_OF_SCOPE",
             "reason_code": "R-C2-01-NON_GROUP_MARKET",
             "confidence": "high",
+            "nlp_score": nlp_score,
+            "confidence_score": 1.0,
         }
     if not _is_california(classified):
         return classified | {
             "network_type": "OUT_OF_SCOPE",
             "reason_code": "R-C2-02-NON_CA_SCOPE",
             "confidence": "high",
+            "nlp_score": nlp_score,
+            "confidence_score": 1.0,
         }
     for network_type, pattern in _RESTRICTIVE_NETWORKS:
         if pattern.search(plan_name):
@@ -61,23 +96,40 @@ def classify_plan(row: Mapping[str, str]) -> dict[str, str]:
                 "network_type": network_type,
                 "reason_code": "R-C2-03-RESTRICTIVE_TOKEN",
                 "confidence": "high",
+            "nlp_score": nlp_score,
             }
     if _EOA.search(plan_name):
         return classified | {
             "network_type": "UNRESOLVED",
             "reason_code": "R-C2-05-EOA_UNVERIFIED",
             "confidence": "low",
+            "nlp_score": nlp_score,
+            "confidence_score": 0.0,
         }
     if _PPO.search(plan_name):
         return classified | {
             "network_type": "PPO",
             "reason_code": "R-C2-04-PPO_TOKEN",
             "confidence": "medium",
+            "nlp_score": nlp_score,
+            "confidence_score": 0.5,
         }
+    if use_embeddings and _HAS_ST:
+        score = _semantic_ppo_score(plan_name)
+        if score is not None and score >= 0.80:
+            confidence = "high" if score >= 0.90 else "medium" if score >= 0.85 else "low"
+            return classified | {
+                "network_type": "PPO",
+                "reason_code": "R-C2-08-NLP_FALLBACK",
+                "confidence": confidence,
+                "confidence_score": round(score, 6),
+                "nlp_score": score,
+            }
     return classified | {
         "network_type": "UNRESOLVED",
         "reason_code": "R-C2-06-INSUFFICIENT_PLAN_EVIDENCE",
         "confidence": "low",
+            "nlp_score": nlp_score,
     }
 
 
@@ -146,7 +198,7 @@ def run_c2(cfg: Config) -> StageResult:
     if not plans_path.is_file():
         raise FileNotFoundError(f"C2 needs C1 output: {plans_path}. Run `make c1` first.")
     started_at = time.monotonic()
-    plans = [classify_plan(row) for row in pq.read_table(plans_path).to_pylist()]
+    plans = [classify_plan(row, use_embeddings=True) for row in pq.read_table(plans_path).to_pylist()]
     rate_files = unique_ppo_rate_files(plans)
     stage_dir = cfg.stage_dir("c2")
     stage_dir.mkdir(parents=True, exist_ok=True)
@@ -172,3 +224,4 @@ def run_c2(cfg: Config) -> StageResult:
         started_at=started_at,
     )
     return StageResult("c2", summary, (plan_network_path, rate_files_path, excel_path, manifest_path))
+
