@@ -27,9 +27,10 @@ import json
 import math
 import zipfile
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import ijson
 import pandas as pd

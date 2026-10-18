@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import re
 import time
 import zipfile
@@ -25,6 +26,7 @@ C5_COLUMNS = [
     "NPI", "TIN", "Address", "Billing_Code", "Specialty", "Rate",
     "Address_Status", "Address_Confidence", "Address_Source", "Address_Source_Count",
     "Address_Record_Updated_At", "Address_Role", "Address_Evidence_Tier",
+    "Geocode_Status",
     "Match_Method", "TIN_Address_Link_Status", "Taxonomy_Code",
     "Specialty_Source", "Specialty_Status", "Negotiated_Type", "Billing_Class",
     "Setting", "Service_Code", "Modifiers", "Source_File", "Selection_Rule",
@@ -104,6 +106,24 @@ def _fuzzy_addr_equal(a: str, b: str) -> bool:
         return False
     ratio = SequenceMatcher(None, ca, cb).ratio()
     return ratio >= 0.97
+
+
+def _geocode_status(addr: str) -> str:
+    if os.environ.get("PTD_GEOCODE") != "1":
+        return "disabled"
+    if not addr:
+        return "not_attempted"
+    try:
+        import urllib.parse
+        import urllib.request
+        params = urllib.parse.urlencode({"address": addr, "benchmark": "Public_AR_Current", "format": "json"})
+        url = "https://geocoding.geo.census.gov/geocoder/locations/address?" + params
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        matches = data.get("result", {}).get("addressMatches", [])
+        return "matched" if matches else "no_match"
+    except (OSError, ValueError, TimeoutError):
+        return "error"
 
 
 def _valid_npi(npi: str) -> bool:
@@ -550,6 +570,7 @@ def run_c5(cfg: Config, c4_path: Path | None = None, output_dir: Path | None = N
                 "Address_Record_Updated_At": updated,
                 "Address_Role": role,
                 "Address_Evidence_Tier": tier,
+                "Geocode_Status": _geocode_status(orig_addr if norm != "" else ""),
                 "Match_Method": "exact_npi" if _valid_npi(npi) else "invalid_npi",
                 "Confidence_or_Evidence_Level": "HIGH" if addr_status == "CORROBORATED" else "MEDIUM" if addr_status == "SINGLE_SOURCE" else "LOW" if addr_status == "CONFLICTING" else "NONE",
                 "TIN_Address_Link_Status": tin_link,
