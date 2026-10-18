@@ -164,3 +164,10 @@ Template:
 - **Evidence:** Real run excluded 5 rows with NPI `0`; curated rows fell from 21,858 to 21,853.
 - **Alternatives rejected:** Dropping invalid NPIs from raw data or replacing them with null.
 - **Confidence / risk:** High.
+
+### R-C3-01 — Grade every C2 candidate file before C4 extraction
+- **Rule:** C3 reads `stage/c2/rate_files.parquet`, resolves every URL to one member in supplied source archive, and writes one file-metric row per candidate. C4 implicitly consumes only C2's sole queued file and requires its C3 metric row.
+- **Why:** C1/C2 owns scope; C3 must grade exactly files C4 will extract, never a hand-picked file.
+- **Evidence:** `pytest tests/test_c2_c3_c4_connection.py -q` creates C1/C2 source archive, grades queued file, then extracts same source.
+- **Alternatives rejected:** Hardcoded Health Net member in C4; it bypasses C2 and can silently extract out-of-scope data.
+- **Confidence / risk:** High for one-file California Health Net scope. Multiple candidate files require explicit C4 input until per-file fan-out is added.

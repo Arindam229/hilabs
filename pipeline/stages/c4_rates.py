@@ -13,7 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ijson
+import pyarrow.parquet as pq
 
+from pipeline.io.c2_queue import single_c2_rate_source
 from pipeline.io.manifest import write_manifest
 
 RAW_COLUMNS = (
@@ -166,8 +168,27 @@ def _resolve_rate_file(cfg, rate_file):
     env = os.environ.get("PTD_RATE_FILE")
     if env:
         return Path(env).expanduser()
-    return (cfg.data_dir / "raw" / "centene" / "in_network" /
-            "2026-09-30_centene-management-company-llc_healthnet-ca_in-network.json")
+    raise ValueError("C4 needs --rate-file, sources.rate_file, PTD_RATE_FILE, or a C2 candidate queue.")
+
+
+def _resolve_c4_source(cfg, rate_file, rate_member):
+    """Use explicit input for debugging; otherwise consume C2's sole queue row."""
+    if rate_file is not None or getattr(cfg, "rate_file", None) or os.environ.get("PTD_RATE_FILE"):
+        return _resolve_rate_file(cfg, rate_file), rate_member or os.environ.get("PTD_RATE_MEMBER"), None
+    rate_file_url, member = single_c2_rate_source(cfg)
+    return cfg.archive, member, rate_file_url
+
+
+def _c3_quality_score(cfg, rate_file_url):
+    if rate_file_url is None:
+        return None
+    metrics_path = cfg.stage_dir("c3") / "file_metrics.parquet"
+    if not metrics_path.is_file():
+        raise FileNotFoundError(f"C4 needs C3 output: {metrics_path}. Run `python -m pipeline c3` first.")
+    matches = [row for row in pq.read_table(metrics_path).to_pylist() if row["rate_file_url"] == rate_file_url]
+    if len(matches) != 1:
+        raise ValueError(f"C3 has no unique metric row for C2 rate file {rate_file_url!r}")
+    return float(matches[0]["quality_score"])
 
 
 def _resolve_output_dir(cfg, output_dir):
@@ -248,10 +269,8 @@ def _selection_rule(candidates, selected):
 
 def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
     started_at = time.monotonic()
-    input_path = _resolve_rate_file(cfg, rate_file)
-    member = rate_member or os.environ.get("PTD_RATE_MEMBER")
-    if member is None and input_path.suffix.lower() == ".zip":
-        member = "hilabs_dataset_2026-10-17/centene/in_network/2026-09-30_centene-management-company-llc_healthnet-ca_in-network.json"
+    input_path, member, source_rate_file_url = _resolve_c4_source(cfg, rate_file, rate_member)
+    c3_quality_score = _c3_quality_score(cfg, source_rate_file_url)
     _validate_input(input_path, member)
     out_dir = _resolve_output_dir(cfg, output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -283,7 +302,7 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
     raw_writer = csv.DictWriter(raw_file, fieldnames=RAW_COLUMNS, extrasaction="ignore")
     raw_writer.writeheader()
 
-    source_name = input_path.name
+    source_name = Path(member).name if member else input_path.name
     service_count = 0
     negotiated_rate_count = 0
     raw_count = 0
@@ -558,6 +577,8 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
     summary = {
         "stage": "c4",
         "input_file": str(input_path),
+        "source_rate_file_url": source_rate_file_url,
+        "c3_quality_score": c3_quality_score,
         "status": "completed",
         "service_entries_processed": service_count,
         "negotiated_rate_entries_processed": negotiated_rate_count,
