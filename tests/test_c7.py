@@ -229,11 +229,12 @@ def test_breadth_is_self_contained_within_specialty():
     assert by_npi["2"]["breadth_pct"] == pytest.approx(100.0)
 
 
-def test_provider_with_no_priceable_codes_defaults_to_market_average():
+def test_provider_with_no_priceable_codes_is_unscored_not_average():
     rows = [{"npi": "1", "tin": "T1", "billing_code": "RC1", "specialty": "X"}]  # no reference_ratio at all
     providers, _ = aggregate_providers(rows, {})
     assert providers[0]["ppi_raw"] is None
-    assert providers[0]["ppi_credible"] == 1.0
+    assert providers[0]["ppi_credible"] is None
+    assert providers[0]["quadrant"] == "Insufficient data"
     assert providers[0]["z_credibility"] == 0.0
 
 
