@@ -24,7 +24,7 @@ from pipeline.config import Config
 from pipeline.io.manifest import write_manifest
 from pipeline.stages.c1_index import PLAN_COLUMNS, StageResult, _write_parquet
 
-NETWORK_COLUMNS = PLAN_COLUMNS + ("network_type", "reason_code", "confidence")
+NETWORK_COLUMNS = PLAN_COLUMNS + ("network_type", "reason_code", "confidence", "confidence_score")
 RATE_FILE_COLUMNS = (
     "rate_file_url",
     "associated_ppo_plan_count",
@@ -78,12 +78,14 @@ def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[s
             "network_type": "OUT_OF_SCOPE",
             "reason_code": "R-C2-01-NON_GROUP_MARKET",
             "confidence": "high",
+            "confidence_score": 1.0,
         }
     if not _is_california(classified):
         return classified | {
             "network_type": "OUT_OF_SCOPE",
             "reason_code": "R-C2-02-NON_CA_SCOPE",
             "confidence": "high",
+            "confidence_score": 1.0,
         }
     for network_type, pattern in _RESTRICTIVE_NETWORKS:
         if pattern.search(plan_name):
@@ -97,12 +99,14 @@ def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[s
             "network_type": "UNRESOLVED",
             "reason_code": "R-C2-05-EOA_UNVERIFIED",
             "confidence": "low",
+            "confidence_score": 0.0,
         }
     if _PPO.search(plan_name):
         return classified | {
             "network_type": "PPO",
             "reason_code": "R-C2-04-PPO_TOKEN",
             "confidence": "medium",
+            "confidence_score": 0.5,
         }
     if use_embeddings and _HAS_ST:
         score = _semantic_ppo_score(plan_name)
@@ -112,6 +116,7 @@ def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[s
                 "network_type": "PPO",
                 "reason_code": "R-C2-08-NLP_FALLBACK",
                 "confidence": confidence,
+                "confidence_score": round(score, 6),
             }
     return classified | {
         "network_type": "UNRESOLVED",
