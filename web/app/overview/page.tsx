@@ -63,6 +63,10 @@ export default function OverviewPage() {
   }, []);
 
   useEffect(() => {
+    fetch("/api/c2").then((r) => r.ok ? r.json() : null).then((j) => { if (j) setC2(j); }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
     fetch("/api/c2").then((r) => r.ok ? r.json() : null).then((j) => { if (j) { console.log("C2", j); setC2(j); } }).catch((e) => console.error("C2 fetch", e));
   }, []);
 
@@ -151,6 +155,46 @@ export default function OverviewPage() {
                   <Bar dataKey="value" fill="#3B82F6" />
                 </BarChart>
               </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card><CardContent className="p-6 text-muted-foreground">Loading C2 network data…</CardContent></Card>
+      )}
+      {c2 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>C2 PPO Network Classification</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {Object.entries(c2.network_type_counts || {}).map(([k, v]) => (
+                <div key={k} className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">{k}</div>
+                  <div className="text-xl font-bold tabular-nums">{Number(v).toLocaleString()}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 text-sm text-muted-foreground">
+              Confidence: {Object.entries(c2.confidence_counts || {}).map(([k,v]) => `${k}: ${v}`).join(" · ")}
+            </div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              NLP score range: {c2.nlp_score_min?.toFixed(3)} – {c2.nlp_score_max?.toFixed(3)} (mean {c2.nlp_score_mean?.toFixed(3)})
+            </div>
+            <div className="mt-4 space-y-2">
+              {Object.entries(c2.confidence_counts || {}).map(([k, v]) => {
+                const max = Math.max(...Object.values(c2.confidence_counts || {}).map(Number));
+                const pct = max > 0 ? (Number(v) / max) * 100 : 0;
+                return (
+                  <div key={k} className="flex items-center gap-3">
+                    <span className="w-20 text-sm capitalize">{k}</span>
+                    <div className="flex-1 h-6 bg-muted rounded overflow-hidden">
+                      <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-sm tabular-nums w-12 text-right">{Number(v).toLocaleString()}</span>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
