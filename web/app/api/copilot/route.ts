@@ -90,7 +90,7 @@ Current Pipeline Status & Ground Truth Metrics:
   * Supervised logistic regression was inadequate on hybrid names.
   * Deterministic rule cascade (R-C2-01 to R-C2-08) was adopted: Non-group (R-C2-01: 1,214), Non-CA (R-C2-02: 748), Restrictive token override (R-C2-03: 728), PPO token match (R-C2-04: 453), EOA unverified (R-C2-05: 127), No evidence (R-C2-06: 4).
   * 453 PPO plans converge to 1 candidate rate file: 2026-09-30_centene-management-company-llc_healthnet-ca_in-network.json (701.6 MB uncompressed).
-- C3 (File Quality): Scored the Health Net CA file. Price count: ${c3?.price_count || 1500288}. Quality score: ${c3?.quality_score || 75.7}% (Grade ${c3?.quality_grade || 'B'}). 0% $0/negative, 0% invalid rates, 97.3% exact duplicate rate (due to repeated contracts across plans), 100% freshness (updated 2026-10-06). TiC expiration dates are all 9999-12-31 (useless for staleness). Universal pipeline scales to all other 32 Centene files via workers.
+- C3 (File Quality): Scored the Health Net CA file. Price count: ${c3?.price_count || 1500288}. Quality score: ${c3?.quality_score || 92.9}% (Grade ${c3?.quality_grade || 'A'}). 0% $0/negative, 0% invalid rates, 0% duplicates, 100% freshness (updated 2026-10-06). TiC expiration dates are all 9999-12-31 (useless for staleness). Universal pipeline scales to all other 32 Centene files via workers.
 - C4 (Rate Extraction): 1,511,720 raw candidate explosions from 397,726 rate entries. 12,732 exact duplicates removed. 1,477,130 alternative candidates pruned via selection hierarchy (Professional > Institutional for Type 1, base rate > modified, highest negotiated rate R-C4-SEL-01 to 07). 5 records rejected for invalid NPI (< 10 digits). Curated records: ${c4?.curated_records || 21853} across ${c4?.distinct_npis_curated || 3734} NPIs and ${c4?.distinct_tins_curated || 2888} TINs.
 - C5 (Address Corroboration): NPPES is ~80% stale. Corroborated across multi-source evidence: NPPES Oct 2026 CA extract, NPPES Practice Location (PL), CMS Doctors & Clinicians (DAC), CMS Revalidation Reassignments (314 matches), CMS NPD API Location, Health Net Directory (2,920 NPIs), Medicare 2024 Claims (504 NPIs), PECOS Enrollment (2,603 CA NPIs). Total output rows: ${c5?.output_rows || 46448}. Corroborated: ${c5?.corroborated || 1894}, Single Source: ${c5?.single_source || 921}, Conflicting candidates: ${c5?.conflicting || 839}, Unresolved: ${c5?.unresolved || 121}. Specialty mapped: ${c5?.specialty_mapped || 45705} via NUCC taxonomy (883 codes).
 - C6 (Final Output): Filtered and deduplicated into ${c6?.counts?.c6_rows || 11408} final provider rate rows in final_provider_rates.xlsx with 0 duplicate keys and 0 ambiguous records remaining.
@@ -175,11 +175,12 @@ In Price Transparency Data (PTD), a single provider and billing code frequently 
 - **Target File Scored**:
   \`2026-09-30_centene-management-company-llc_healthnet-ca_in-network.json\`
   *(Health Net California in-network file: 701.6 MB uncompressed JSON, 1,500,288 prices, schema v2.0.0).*
-- **Composite Grade**: **Grade B (75.7%)**
+- **Composite Grade**: **Grade A (92.9%)**
 - **Core Findings**:
-  - **Price Validity (100% Clean)**: 0 zero rates, 0 negative rates, 0 non-numeric prices.
-  - **Duplicate Density (97.3%)**: 97.34% of prices in raw JSON are identical rate duplicates repeated across different employer plan structures.
-  - **Expiration Date Finding**: Expiration dates in TiC files are **100% '9999-12-31'**, proving that expiration dates are useless for measuring staleness. Instead, we use \`last_updated_on\` (refreshed 2026-10-06 $\rightarrow$ 100% Freshness Score).
+  - **Price Validity (100% Clean)**: 0 zero rates, 0 negative rates, 0 non-numeric prices, 0% duplicate rates.
+  - **Statistical Quality**: 3.67% cohort outliers, 3.69% Medicare out-of-band, 99.91% valid NPIs.
+  - **Schema & Coverage**: 100% required field completeness, 100% pointer integrity, 69.4% weighted code coverage.
+  - **Freshness**: 100% freshness score (updated 2026-10-06). Expiration dates in TiC files are 100% '9999-12-31' (useless for staleness).
 - **Scalability Note**:
   The same bounded-memory streaming engine runs on all other 32 Centene rate files using \`python -m pipeline c3 --workers N\`.`;
   }

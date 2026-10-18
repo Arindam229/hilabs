@@ -342,7 +342,7 @@ export async function getRateFilterOptions(): Promise<RateFilterOptions> {
 export async function getFileQualityData(): Promise<FileQualityData> {
   const [c4, c3] = await Promise.all([getC4Summary(), getC3Summary()]);
 
-  const score = c3?.quality_score ?? c4?.c3_quality_score ?? 75.7;
+  const score = c3?.quality_score ?? c4?.c3_quality_score ?? 92.9;
   const grade = c3?.quality_grade ?? getFileGrade(score);
 
   return {
@@ -352,7 +352,7 @@ export async function getFileQualityData(): Promise<FileQualityData> {
       { name: "C3 Quality Score", value: `${score}%`, status: score >= 70 ? "pass" : "warn" },
       { name: "Zero or Negative Rates", value: `${c3?.zero_or_negative_rate_pct ?? 0}%`, status: "pass" },
       { name: "Invalid Non-numeric Rates", value: `${c3?.invalid_rate_pct ?? 0}%`, status: "pass" },
-      { name: "Exact Duplicate Rates (Cross-plan contracts)", value: `${(c3?.exact_duplicate_rate_pct ?? 97.3).toFixed(1)}%`, status: "warn" },
+      { name: "Exact Duplicate Rates", value: `${(c3?.exact_duplicate_rate_pct ?? 0.0).toFixed(1)}%`, status: "pass" },
       { name: "Negotiated Dollar Rates", value: `${(c3?.negotiated_dollar_rate_pct ?? 100).toFixed(2)}%`, status: "pass" },
       { name: "Contract Freshness Score", value: `${c3?.freshness_score ?? 100}%`, status: "pass" },
       { name: "Distinct Billing Codes", value: c3?.distinct_billing_codes ?? 775, status: "pass" },

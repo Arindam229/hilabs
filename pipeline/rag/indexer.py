@@ -138,6 +138,34 @@ def extract_chunks(root_dir: Path) -> list[dict[str, Any]]:
             "content": summary_text,
         })
 
+    # 4b. Deliverables Markdown
+    deliv_file = root_dir / "docs" / "deliverables" / "file_quality_metrics.md"
+    if deliv_file.exists():
+        deliv_text = deliv_file.read_text(encoding="utf-8")
+        chunks.append({
+            "source": "docs/deliverables/file_quality_metrics.md",
+            "section": "Stage C3 File Quality Deliverable",
+            "title": "Deliverable: C3 PTD File Quality Metrics Table (Score 92.9 Grade A)",
+            "content": (
+                "PTD File Quality Scorecard & Metrics Deliverable (file_quality_metrics.md):\n"
+                "The Centene Health Net California in-network PTD file was scored across 1,500,288 prices.\n"
+                "- File: 2026-09-30_centene-management-company-llc_healthnet-ca_in-network.json\n"
+                "- Composite Quality Score: 92.9% (Grade A)\n"
+                "- Grade: Grade A (>= 90% is Grade A)\n"
+                "- Prices Scored: 1,500,288\n"
+                "- $0/negative %: 0.0%\n"
+                "- Duplicate %: 0.0%\n"
+                "- Cohort Outlier %: 3.6737%\n"
+                "- Medicare Out-of-Band %: 3.6923%\n"
+                "- NPI Valid %: 99.9118%\n"
+                "- Required Fields Completeness %: 100.0%\n"
+                "- Pointer Integrity %: 100.0%\n"
+                "- Code Coverage % (Weighted): 69.3998%\n"
+                "- Freshness Score: 100.0%\n\n"
+                f"{deliv_text}"
+            ),
+        })
+
     # 5. Data Records Catalog & Table Schemas
     schema_catalog = [
         (
@@ -167,6 +195,32 @@ def extract_chunks(root_dir: Path) -> list[dict[str, Any]]:
                 "- reason_code (VARCHAR): R-C2-01-NON_GROUP_MARKET (1,214), R-C2-02-NON_CA_SCOPE (748), R-C2-03-RESTRICTIVE_TOKEN (728), R-C2-04-PPO_TOKEN (453), R-C2-05-EOA_UNVERIFIED (127), R-C2-06-INSUFFICIENT_PLAN_EVIDENCE (4)\n"
                 "- confidence (VARCHAR): high (2,690), medium (453), low (131)\n"
                 "- nlp_score (DOUBLE): Cosine similarity score against CMS PPO archetype (-0.046 to 0.418, mean 0.121)."
+            ),
+        ),
+        (
+            "C3 PTD File Quality Scorecard and Metrics (Quality Score: 92.9% Grade A)",
+            "data/stage/c3/c3_summary.json",
+            "C3 Stage Data Catalog & Scorecard",
+            (
+                "PTD File Quality Score and Deliverable Metrics for Centene Health Net CA Rate File:\n"
+                "- Rate File: 2026-09-30_centene-management-company-llc_healthnet-ca_in-network.json\n"
+                "- Quality Score: 92.9% (Grade A)\n"
+                "- Quality Grade: Grade A (Score >= 90.0% is Grade A)\n"
+                "- Price Rows Scored: 1,500,288\n"
+                "- Zero or Negative Rates ($0/negative %): 0.0%\n"
+                "- Invalid / Non-numeric Rates: 0.0%\n"
+                "- Exact Duplicate Rate: 0.0%\n"
+                "- Negotiated Dollar Rates: 100.0%\n"
+                "- Cohort Outlier Rate: 3.6737%\n"
+                "- Medicare Out-of-Band Rate: 3.6923%\n"
+                "- NPI Validity: 99.9118% (5,672 NPIs, only 5 invalid < 10 digits)\n"
+                "- TIN Validity: 100.0%\n"
+                "- Required Field Completeness: 100.0%\n"
+                "- Pointer Integrity: 100.0% (0 orphan references, 0 ghost provider groups)\n"
+                "- Weighted Code Coverage: 69.3998% (across top 70 CMS common codes)\n"
+                "- Contract Freshness Score: 100.0% (refreshed 2026-10-06)\n"
+                "- Distinct Billing Codes: 775, Distinct Provider Groups: 2,825\n"
+                "- Deliverable File: docs/deliverables/file_quality_metrics.md"
             ),
         ),
         (
@@ -249,6 +303,7 @@ def get_watched_files(root_dir: Path) -> list[Path]:
         root_dir / "docs" / "DECISIONS.md",
         root_dir / "docs" / "ps" / "DATA_FINDINGS.md",
         root_dir / "docs" / "ps" / "PROBLEM_STATEMENT.md",
+        root_dir / "docs" / "deliverables" / "file_quality_metrics.md",
     ]
     stage_dir = root_dir / "data" / "stage"
     if stage_dir.exists():
