@@ -40,4 +40,4 @@ $(C5_RESULT):
 c6: $(C5_RESULT)
 	uv run python -m pipeline c6
 
-pipeline: c6
+pipeline: c1 c2 c3 c4 c5 c6
