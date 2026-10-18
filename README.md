@@ -298,6 +298,17 @@ The core pipeline (C1–C7) is **deterministic and rule-based**: every decision 
 | **RAG copilot — record lookup** | DuckDB (no model) | Locally | Exact, parameterised lookups over pipeline outputs by NPI, TIN, billing code or specialty, so answers about specific providers come from the data, not the model | No (read-only) |
 | **RAG copilot — generation** | `qwen2.5:1.5b` via [Ollama](https://ollama.com) (override: `LOCAL_LLM_MODEL`, `LOCAL_LLM_URL`) | Locally on `127.0.0.1:11434` | Answers questions grounded in the retrieved chunks and records ("why was this address chosen?", "what does R-C5-12 do?") | No (read-only) |
 
+**Why rules, not models, decide the PPO network.** We tested learned classifiers against the deterministic rules (explicit-token regex plus scope rules) for C2:
+
+| Approach | Outcome | Decision |
+|---|---|---|
+| Sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`), cosine similarity to a PPO archetype | Confidence **below 0.5** on the plans in question (team evaluation) | Kept only as a reviewer score (`nlp_score`) and a guarded fallback (≥ 0.80) |
+| Logistic-regression classifier (`lg1`) on plan names | Confidence **below 0.5** (team evaluation) | Rejected |
+| TF-IDF + grouping plans by shared rate-file URL (`5a277c1`) | **Mislabelled HMO plans as PPO**, because HMO and PPO plans share Health Net's single CA rate file | Reverted (`ab96954`) |
+| **Regex tokens + deterministic scope rules** (`R-C2-01`…`07`) | Every decision explained by a rule ID; restrictive tokens (HMO/EPO/POS) checked first; ambiguous plans left `UNRESOLVED` instead of guessed | **Used** |
+
+The reason is structural, not just a score. Plan names are short, coded strings (real examples: `CA L PPO 30/500/4000/30%`, `CA L SAL HMO 20/20%/2500`, `CA L EOA 20/0/1500`, `CA L&T CUS SAL CEMENT MASONS CA H&W GF+`), and the strongest signal is an explicit network token. A model can only blur that token with surrounding words. Rules are also what the PS asks for ("explain your logic and how you ruled out HMO, EPO and POS").
+
 **Why these choices:**
 - **Everything runs locally.** No pipeline data or provider records leave the machine, and there are no API keys or per-query costs.
 - **Small models.** A ~1.5B-parameter LLM and a 22M-parameter embedder run on a laptop CPU.
