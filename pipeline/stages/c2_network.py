@@ -107,10 +107,11 @@ def classify_plan(row: Mapping[str, str], use_embeddings: bool = True) -> dict[s
     if use_embeddings and _HAS_ST:
         score = _semantic_ppo_score(plan_name)
         if score is not None and score >= 0.80:
+            confidence = "high" if score >= 0.90 else "medium" if score >= 0.85 else "low"
             return classified | {
                 "network_type": "PPO",
                 "reason_code": "R-C2-08-NLP_FALLBACK",
-                "confidence": "low",
+                "confidence": confidence,
             }
     return classified | {
         "network_type": "UNRESOLVED",
