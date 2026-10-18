@@ -76,7 +76,7 @@ def enrich_c5_directory(stage_dir: Path) -> dict[str, int]:
     modal = {
         tin: max(counts, key=lambda z: (len(counts[z]), z))
         for tin, counts in zip_counts.items()
-        if counts
+        if counts and len(tin_npis.get(tin, set())) >= 2
     }
 
     enriched = []
