@@ -56,24 +56,31 @@ Centene index files ─► C1 parse ─► C2 PPO network ─► C3 grade files 
 ### Plots for insights
 
 **C2: how 3,274 Centene plans narrow to 453 CA commercial-group PPO plans (every bar is a rule ID)**
+
 ![C2 plan classification](docs/assets/c2_classification.png)
 
-**C2: why rules decide. NLP embedding scores never reach 0.5 (max 0.418), so a 0.8 threshold would miss every PPO plan**
+**C2: why rules decide. NLP embedding scores max out at 0.418, so no plan ever reaches the 0.8 threshold**
+
 ![C2 NLP score distribution](docs/assets/c2_nlp_score_distribution.png)
 
 **C3: file-quality scorecard for the Health Net CA file (92.9, A); code coverage is the one weak dimension**
+
 ![C3 quality metrics](docs/assets/c3_quality_metrics.png)
 
 **C4: from 1,717 services to 21,853 curated rates (log scale)**
+
 ![C4 extraction funnel](docs/assets/c4_extraction_funnel.png)
 
 **C5: the heuristic address-scoring weights; no single non-CMS source reaches VERIFIED alone**
+
 ![C5 scoring weights](docs/assets/c5_scoring_weights.png)
 
 **C6: what verifies each final row; payer and claims evidence lifts verification from 4.8 % to 25.0 % (strong) / 57.1 % (total)**
+
 ![C6 verification by source](docs/assets/c6_verification_by_source.png)
 
 **C7: providers by price-vs-peers × breadth quadrant**
+
 ![C7 quadrants](docs/assets/c7_quadrants.png)
 
 ---
@@ -139,7 +146,7 @@ make setup                                   # uv sync
 # Put the dataset archive at data/hilabs_dataset_2026-10-17.zip
 # (or: export PTD_DATA_DIR=/folder/containing/the/zip)
 
-make pipeline                                # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7 (every source on)
+PTD_NPD_API=1 make pipeline                  # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7
 make test                                    # ruff + pytest
 ```
 
@@ -150,7 +157,7 @@ make c1 && make c2          # index parsing, PPO network      → data/out/c2_pp
 make c3                     # file quality grades             → docs/deliverables/file_quality_metrics.md
 make c4                     # rate extraction                 → data/stage/c4/selected_rates.csv
 make c5hn                   # Health Net evidence, replayed offline from the archive (no API, no key)
-make c5                     # address engine                  → data/stage/c5/c5result.csv
+PTD_NPD_API=1 make c5       # address engine                  → data/stage/c5/c5result.csv
 make c6                     # final rate file                 → data/out/final_provider_rates.xlsx
 make c7                     # cost-effectiveness              → data/out/c7_cost_effectiveness.xlsx
 ```
@@ -158,14 +165,12 @@ make c7                     # cost-effectiveness              → data/out/c7_co
 | Environment variable | Effect |
 |---|---|
 | `PTD_DATA_DIR` | Folder that contains the dataset archive (default `data/`) |
-| `PTD_NPD_API` | CMS National Provider Directory lookups in C5. **On by default**, for every NPI (`PTD_NPD_MAX_NPIS=0`). Responses are cached per NPI. `PTD_NPD_API=0` disables it; `PTD_NPD_WORKERS` (default 4) sets concurrency |
-| `PTD_GEOCODE` | Census geocoding of candidate addresses in C5. **On by default**, cached. `PTD_GEOCODE=0` disables it; `PTD_GEOCODE_WORKERS` (default 8) sets concurrency |
+| `PTD_NPD_API=1` | Use the CMS National Provider Directory FHIR API in C5. Responses are cached (`PTD_NPD_MAX_NPIS`, `PTD_NPD_WORKERS`) |
 | `PTD_AS_OF` | Fixed reference date for freshness and expiry scoring, so reruns are reproducible |
 | `PTD_C3_WORKERS`, `PTD_C3_SAMPLE_EVERY` | C3 parallelism and explicit diagnostic sampling (C4 rejects sampled grades) |
-| `PTD_C3_ROW_FLAG_LIMIT`, `PTD_C3_MAX_OUTLIER_COHORTS` | Optional caps on C3 exception examples and outlier cohorts. **Default 0 = no cap** |
 | `PTD_REVALIDATION_ZIP`, `PTD_MEDICARE_PROVIDER_ZIP`, `PTD_PECOS_ENROLLMENT_ZIP` | Use a standalone file in place of the copy inside the archive |
 
-**Live Health Net refresh (optional).** `make c5hn` replays the responses archived in the dataset, so a clean clone reproduces the 2026-10-18 result offline. To refresh from the live directory, run `uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5`. There are no hard caps on `--workers` or `--rps`, and every result page is fetched. The defaults stay polite because a live API that is hammered starts refusing requests. Every response is cached.
+**Live Health Net refresh (optional).** `make c5hn` replays the responses archived in the dataset, so a clean clone reproduces the 2026-10-18 result offline. To refresh from the live directory, run `uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5`. It is rate-limited and caches every response.
 
 ---
 
@@ -247,6 +252,26 @@ Also reported (not scored): TIN validity, empty provider groups, invalid code fo
 - leading zeros dropped (`104` should be `00104`, `23` should be `0023`)
 - CPT lab-test and performance-tracking codes mislabelled as HCPCS (`0202U`, `3008F`)
 - a `ZZZZZ` placeholder code
+
+#### How C3 scales: performance engineering
+
+C3 graded the 701 MB Health Net file (**1,500,288 prices**) in **48.1 s** (≈ 31,000 prices/s, from `data/stage/c3/_manifest.json`) on a laptop. Memory stays flat however large the file is.
+
+| Optimization | What it does | Why it matters |
+|---|---|---|
+| **Streaming straight from the zip** | `ijson` iterates `in_network` items directly from the archive member; nothing is extracted to disk | The file is never loaded whole. TiC files from other payers can be 100s of GB |
+| **C JSON parser** | `ijson` runs on its `yajl2_c` C backend | Measured on this file: 150 items in 0.2 s vs 3.0 s with the pure-Python backend (≈ 15× faster) |
+| **Header-only pre-scan** | A first pass reads `version`, `last_updated_on` and `provider_references` (NPI/TIN checks, declared group IDs) and stops as soon as `in_network` starts | Pointer-integrity and NPI checks cost almost nothing. If `provider_references` comes after `in_network` (the schema allows it), the pass keeps streaming instead of scoring it 0 |
+| **On-disk duplicate index** | Each price's identity is a SHA-256 of its normalized fields, checked against a temporary SQLite table in batches of 500 (`INSERT OR IGNORE` + batched `IN` lookups) | Exact duplicate detection over 1.5M prices without holding 1.5M keys in memory. The temporary DB is deleted after each file |
+| **Bounded outlier estimation** | A reservoir sample of 512 rates per (procedure × billing class × rate type) cohort, with a fixed-seed RNG; robust z-score (MAD on log rates, \|z\| > 3), scaled back to each cohort's full size | Outlier rate without storing every price. Deterministic across reruns. Optional cohort cap: `PTD_C3_MAX_OUTLIER_COHORTS` (default none) |
+| **Counters sized by codes, not rows** | Per-code sets (descriptions, code types, providers) and item-header counters | They grow with the number of distinct codes (hundreds), not with the 1.5M rows |
+| **Reference data loaded once** | The Medicare fee-schedule table (RVU × CA GPCI) and the HiLabs weights are read once per run, in memory from their nested zips, and shared by every file graded | No repeated parsing per file and no extracted reference files |
+| **Exception rows streamed to Parquet** | Row-level flags (`INVALID_RATE`, `ZERO_OR_NEGATIVE_RATE`, `EXACT_DUPLICATE`) are written in batches to zstd-compressed Parquet | Auditable examples without a large CSV. Counts are always exact; examples can be capped with `PTD_C3_ROW_FLAG_LIMIT` (default none) |
+| **Parallel grading per file** | `PTD_C3_WORKERS` grades several queued rate files at once, each with its own temporary index and flag file | One rate file in scope today; across Centene's 33 files or other states, files are graded concurrently |
+| **Explicit, refused-downstream sampling** | `PTD_C3_SAMPLE_EVERY` / `PTD_C3_BLOCK_SIZE` keep one deterministic block of items in N for quick diagnostics; the result is marked `is_sampled` | Fast exploratory grading is available, but **C4 refuses sampled grades**, so a sample can never drive final rate selection |
+| **Reproducible and reused** | `PTD_AS_OF` pins the date for freshness and expiry; the manifest records inputs, counts, runtime, config hash and git SHA. C4 reads C3's grade instead of regrading | Same inputs give the same grade, and the expensive pass runs once per file |
+
+**Next step at larger scale:** workers are threads today. With many files, a process pool (one file per process) would put every core to work.
 
 ### C4 · Extracting rates
 
@@ -330,7 +355,7 @@ The core pipeline (C1–C7) is **deterministic and rule-based**: every decision 
 | Approach | Outcome | Decision |
 |---|---|---|
 | Sentence embeddings (`sentence-transformers/all-MiniLM-L6-v2`), cosine similarity to a PPO archetype | Scores compress at the bottom: about 1,300 plans in 0.0–0.1, about 1,550 in 0.1–0.2, about 330 in 0.2–0.3, about 75 in 0.3–0.4; **maximum 0.418; 0 plans ≥ 0.5**. A 0.8 threshold would catch **0 %** of PPO plans (`nlp_score` distribution over all plans, shown on the dashboard overview) | Rejected as a classifier. Kept only as a reviewer column (`nlp_score`); its ≥ 0.80 fallback cannot fire on this data |
-| Logistic-regression classifier on plan names | Confidence **below 0.5** (team evaluation) | Rejected |
+| Logistic regression (`scikit-learn` `LogisticRegression`) on plan names | Confidence **below 0.5** (team evaluation) | Rejected |
 | TF-IDF + grouping plans by shared rate-file URL (`5a277c1`) | **Mislabelled HMO plans as PPO**, because HMO and PPO plans share Health Net's single CA rate file | Reverted (`ab96954`) |
 | **Regex tokens + deterministic scope rules** (`R-C2-01`…`07`) | Every decision explained by a rule ID; restrictive tokens (HMO/EPO/POS) checked first; ambiguous plans left `UNRESOLVED` instead of guessed | **Used** |
 
@@ -414,7 +439,7 @@ cd web && npm install && npm run dev          # Next.js dashboard (overview, rat
 - **Every rule has an ID and evidence.** Recorded in `docs/DECISIONS.md` with the rule, the reason, the evidence query or result, the alternatives rejected and the risk.
 - **Honest outputs.** Unknown is `None`, not 0 or 100. Absence of evidence is never scored as good, and every fallback is counted in the output.
 - **Reproducible.** One archive, config-driven paths, manifests with config hash and git SHA, `PTD_AS_OF` for date-dependent metrics, and an offline replay of the live directory evidence.
-- **Polite external calls, no hard caps.** Every source is on by default with no NPI or page limits. Live APIs default to a polite global rate (overridable), are retried with backoff, and are cached and resumable. The Health Net web key is read at runtime and never written to disk.
+- **Polite external calls.** Rate-limited (≤ 5 req/s globally), retried with backoff, cached, and resumable. The Health Net web key is read at runtime and never written to disk.
 
 ---
 
