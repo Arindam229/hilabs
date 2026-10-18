@@ -304,23 +304,23 @@ export default function RatesPage() {
                 />
               </div>
 
-              {/* Column Filters Dropdown */}
-              <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground">
+              {/* Column Filters (collapsible) */}
+              <details className="relative">
+                <summary className="inline-flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground cursor-pointer list-none">
                   <Filter className="h-4 w-4" />
                   <span>Filters</span>
                   {hasActiveFilters && (
                     <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
                   )}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-80 p-2">
-                  <DropdownMenuLabel>Column Filters</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
+                </summary>
+                <div className="absolute z-50 mt-2 w-80 rounded-md border border-border bg-card p-2 shadow-md">
+                  <div className="px-2 py-1.5 text-sm font-semibold">Column Filters</div>
+                  <div className="my-1 h-px bg-border" />
                   {columns.map((col) => {
                     if (!("accessorFn" in col) || !col.id) return null;
                     const colId = col.id;
                     return (
-                      <DropdownMenuItem key={colId} className="flex items-center gap-2 px-2 py-1.5">
+                      <label key={colId} className="flex items-center gap-2 px-2 py-1.5 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={columnVisibility[colId]}
@@ -332,21 +332,21 @@ export default function RatesPage() {
                           }
                           className="h-4 w-4 rounded border-border"
                         />
-                        <label className="text-sm flex-1 cursor-pointer capitalize">{colId.replace("_", " ")}</label>
-                      </DropdownMenuItem>
+                        <span className="text-sm flex-1 capitalize">{colId.replace("_", " ")}</span>
+                      </label>
                     );
                   })}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
+                  <div className="my-1 h-px bg-border" />
+                  <button
                     onClick={clearFilters}
                     disabled={!hasActiveFilters}
-                    className="text-red-600"
+                    className="flex w-full items-center gap-2 px-2 py-1.5 text-sm text-red-600 disabled:opacity-50"
                   >
-                    <X className="h-4 w-4 mr-2" />
+                    <X className="h-4 w-4" />
                     Clear All Filters
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                  </button>
+                </div>
+              </details>
 
               {/* Address Status Filter */}
               <Select
