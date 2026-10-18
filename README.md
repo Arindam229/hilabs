@@ -46,6 +46,36 @@ data/out/c2_ppo_network.xlsx          C2 deliverable workbook
 PPO is plan-level classification only. Shared rate file can serve multiple plan
 types; provider membership needs later rate-file evidence.
 
+## C3: grade queued PPO rate files
+
+```bash
+make c3
+```
+
+C3 streams every C2-queued MRF from archive, without extracting it. It keeps
+only counters, bounded cohort reservoirs and a temporary SQLite duplicate index.
+Outputs:
+
+```text
+data/stage/c3/file_metrics.parquet    file-level quality metrics
+data/stage/c3/row_flags/*.parquet     capped exception examples per MRF
+docs/deliverables/file_quality_metrics.md
+```
+
+Useful resource controls:
+
+```bash
+# Grade separate queued files concurrently. Default: 1 worker.
+PTD_C3_WORKERS=2 make c3
+
+# Diagnostic sampling only: retain one 1,000-service block in every 10 blocks.
+# C4 rejects sampled C3 output; rerun normal C3 before final extraction.
+PTD_C3_SAMPLE_EVERY=10 PTD_C3_BLOCK_SIZE=1000 make c3
+
+# Keep first 25,000 row-level exception examples while retaining exact counts.
+PTD_C3_ROW_FLAG_LIMIT=25000 make c3
+```
+
 ## C4: extract PPO rates
 
 C4 streams the selected Health Net CA in-network TiC JSON and explodes it into

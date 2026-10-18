@@ -178,3 +178,10 @@ Template:
 - **Evidence:** Real C4 output has 21,853 rate rows but only 3,775 distinct `(NPI, TIN)` keys; C5 writes `c5_address_candidates.csv` with 5,917 address candidates over those keys.
 - **Alternatives rejected:** Resolving candidates at `(NPI, TIN, billing_code)` grain or joining source address data directly on TIN, which NPPES and CMS DAC do not expose.
 - **Confidence / risk:** High for pipeline grain. TIN-to-address remains `UNVERIFIED` until group or directory evidence is added; PTD proves only NPI-to-TIN.
+
+### R-C3-02 — Full streaming grade by default; bounded sampled diagnosis only when explicit
+- **Rule:** C3 scans every `in_network` item by default. `PTD_C3_SAMPLE_EVERY=N` retains one deterministic block of `PTD_C3_BLOCK_SIZE` items for every `N` blocks only when requested. C4 rejects sampled C3 output. C3 writes at most `PTD_C3_ROW_FLAG_LIMIT` exception examples while retaining exact exception counts.
+- **Why:** Sampling lowers diagnostic cost on extreme files but must never silently drive final rate selection or reported file quality.
+- **Evidence:** `tests/test_c3_resource_optimizations.py` verifies deterministic block selection and compact exception flags; `tests/test_c2_c3_c4_connection.py` verifies C4 rejects sampled grades.
+- **Alternatives rejected:** Always sampling C3, which weakens C3's required file-level quality claim; loading complete MRFs into memory for exact metrics.
+- **Confidence / risk:** High for memory safety. Cohort-outlier rate is reservoir-sampled and must remain labelled as an estimate; row-flag Parquet is an auditable capped sample when exceptions exceed its limit.
