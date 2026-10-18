@@ -1,9 +1,9 @@
 # Data sources
 
-**One archive holds every input:** `data/hilabs_dataset_2026-10-17.zip` (git-ignored, 2.39 GB, 136 members).
+**One archive holds every input:** `data/hilabs_dataset_2026-10-17.zip` (git-ignored, 2.39 GB, 133 members).
 The pipeline finds members by path suffix (`pipeline/io/archive.py`), so the archive's root folder name
 does not matter. Sizes + sha256: `MANIFEST.txt`, `MANIFEST_referenced_files.txt`,
-`MANIFEST_additions_2026-10-18.txt`, `MANIFEST_caches_2026-10-18.txt` inside it. `COMPLETENESS.txt` checks the 66 files the Centene indexes
+`MANIFEST_additions_2026-10-18.txt` inside it. `COMPLETENESS.txt` checks the 66 files the Centene indexes
 reference (65 match the server, 1 is a 404 on Centene's side); `NOT_OBTAINED.txt` lists what is missing.
 
 | Member (under the archive root) | Source | As of | Used by |
@@ -16,7 +16,6 @@ reference (65 match the server, 1 is a 404 on Centene's side); `NOT_OBTAINED.txt
 | `cms/Medicare Physician & Other Practitioners - by Provider.zip` | data.cms.gov | **data year 2024** | C5 (R-C5-12) |
 | `cms/Medicare Fee-For-Service Public Provider Enrollment.zip` (PECOS Q1+Q3) | data.cms.gov | 2026-07 | C5 flag (R-C5-12) |
 | `healthnet/healthnet_pces_responses_2026-10-18.zip` | Health Net Find-a-Provider API, PPO networks 8201/8203 | 2026-10-18 | c5hn (offline replay) |
-| `caches/cms_npd_cache.zip`, `caches/census_geocode_cache.json` | CMS National Provider Directory API (3,734 NPIs); Census geocoder (5,412 addresses) | 2026-10-18 | C5 seeds its caches from these, so runs are offline-reproducible |
 
 The `cms/` files were downloaded manually: data.cms.gov returns 403 to scripted access from this network.
 A standalone copy can override a member: `PTD_REVALIDATION_ZIP`, `PTD_MEDICARE_PROVIDER_ZIP`, `PTD_PECOS_ENROLLMENT_ZIP`.

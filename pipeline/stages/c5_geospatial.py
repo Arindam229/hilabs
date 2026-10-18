@@ -38,7 +38,7 @@ def enrich_c5_directory(stage_dir: Path) -> dict[str, int]:
             addresses.setdefault(norm, address)
 
     os.environ["PTD_GEOCODE"] = "1"
-    workers = max(1, int(os.environ.get("PTD_GEOCODE_WORKERS", "8")))
+    workers = max(1, min(16, int(os.environ.get("PTD_GEOCODE_WORKERS", "8"))))
     pending = {norm: address for norm, address in addresses.items() if norm not in cache}
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_geocode_address, address, cache): norm for norm, address in pending.items()}

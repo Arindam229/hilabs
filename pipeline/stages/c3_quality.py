@@ -196,14 +196,6 @@ def _identity(item: dict[str, Any], refs: object, price: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def _nonneg_env(name: str, default: int) -> int:
-    """0 means unlimited."""
-    try:
-        return max(0, int(os.environ.get(name, default)))
-    except ValueError:
-        return default
-
-
 def _positive_env(name: str, default: int) -> int:
     try:
         return max(1, int(os.environ.get(name, default)))
@@ -251,7 +243,7 @@ def _flush_identities(
 
     def record(flag_base: dict[str, object], flag: str) -> None:
         nonlocal flags_written
-        if not flag_limit or flags_written < flag_limit:  # 0 = keep every exception example
+        if flags_written < flag_limit:
             flags.append({**flag_base, "flag": flag})
             flags_written += 1
 
@@ -285,7 +277,7 @@ def _reservoir_add(
     too, since that scales with code diversity, not row count or file
     size -- verified on a real 513MB file with 6,068 distinct codes.
     """
-    if max_cohorts and cohort not in reservoirs and len(reservoirs) >= max_cohorts:  # 0 = no cap
+    if cohort not in reservoirs and len(reservoirs) >= max_cohorts:
         return False
     observed[cohort] += 1
     values = reservoirs[cohort]
@@ -830,7 +822,7 @@ def grade_member(
         "code_type_collisions": code_type_collisions,
         "code_type_collision_rate_pct": code_type_collision_rate_pct,
         "distinct_outlier_cohorts": len(reservoirs),
-        "outlier_cohort_cap_reached": bool(max_outlier_cohorts) and len(reservoirs) >= max_outlier_cohorts,
+        "outlier_cohort_cap_reached": len(reservoirs) >= max_outlier_cohorts,
         "outlier_cohort_cap_skipped_prices": outlier_cohort_cap_skipped,
         "quality_score": score,
         "quality_grade": "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 55 else "D" if score >= 40 else "F",
@@ -882,11 +874,11 @@ def run_c3(cfg: Config) -> StageResult:
     stage_dir.mkdir(parents=True, exist_ok=True)
     sample_every = _positive_env("PTD_C3_SAMPLE_EVERY", 1)
     block_size = _positive_env("PTD_C3_BLOCK_SIZE", 1000)
-    flag_limit = _nonneg_env("PTD_C3_ROW_FLAG_LIMIT", 0)
+    flag_limit = _positive_env("PTD_C3_ROW_FLAG_LIMIT", 100_000)
     # Bounds outlier-reservoir memory against code diversity, not row
     # count or file size -- verified these don't correlate on a real
     # 513MB/6,068-distinct-code file. 50,000 is ~8x headroom over that.
-    max_outlier_cohorts = _nonneg_env("PTD_C3_MAX_OUTLIER_COHORTS", 0)
+    max_outlier_cohorts = _positive_env("PTD_C3_MAX_OUTLIER_COHORTS", 50_000)
     as_of = _as_of(os.environ.get("PTD_AS_OF"))
     candidates = [
         (index, str(candidate["rate_file_url"]), archive_member_for_url(cfg, str(candidate["rate_file_url"])))

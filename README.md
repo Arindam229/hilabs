@@ -137,7 +137,7 @@ flowchart LR
 
 ## 4. Quickstart
 
-**Requirements:** Python 3.11+, [`uv`](https://docs.astral.sh/uv/), about 5 GB of free disk (2.4 GB archive + about 2 GB of stage outputs), 8 GB+ RAM, Linux or macOS (Windows via WSL), and the dataset archive.
+**Requirements:** Python 3.11+, [`uv`](https://docs.astral.sh/uv/), about 3 GB of free disk, and the dataset archive.
 
 ```bash
 git clone https://github.com/sivk-kex/hilabs.git && cd hilabs
@@ -146,7 +146,7 @@ make setup                                   # uv sync
 # Put the dataset archive at data/hilabs_dataset_2026-10-17.zip
 # (or: export PTD_DATA_DIR=/folder/containing/the/zip)
 
-make pipeline                                # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7 (every source on)
+PTD_NPD_API=1 make pipeline                  # c1 → c2 → c3 → c4 → c5hn → c5 → c6 → c7
 make test                                    # ruff + pytest
 ```
 
@@ -157,53 +157,26 @@ make c1 && make c2          # index parsing, PPO network      → data/out/c2_pp
 make c3                     # file quality grades             → docs/deliverables/file_quality_metrics.md
 make c4                     # rate extraction                 → data/stage/c4/selected_rates.csv
 make c5hn                   # Health Net evidence, replayed offline from the archive (no API, no key)
-make c5                     # address engine                  → data/stage/c5/c5result.csv
+PTD_NPD_API=1 make c5       # address engine                  → data/stage/c5/c5result.csv
 make c6                     # final rate file                 → data/out/final_provider_rates.xlsx
 make c7                     # cost-effectiveness              → data/out/c7_cost_effectiveness.xlsx
 ```
 
-**Environment variables.** None is required: every source is on and every path has a working default. Set one only to change behaviour.
+| Environment variable | Effect |
+|---|---|
+| `PTD_DATA_DIR` | Folder that contains the dataset archive (default `data/`) |
+| `PTD_NPD_API=1` | Use the CMS National Provider Directory FHIR API in C5. Responses are cached (`PTD_NPD_MAX_NPIS`, `PTD_NPD_WORKERS`) |
+| `PTD_AS_OF` | Fixed reference date for freshness and expiry scoring, so reruns are reproducible |
+| `PTD_C3_WORKERS`, `PTD_C3_SAMPLE_EVERY` | C3 parallelism and explicit diagnostic sampling (C4 rejects sampled grades) |
+| `PTD_REVALIDATION_ZIP`, `PTD_MEDICARE_PROVIDER_ZIP`, `PTD_PECOS_ENROLLMENT_ZIP` | Use a standalone file in place of the copy inside the archive |
 
-| Variable | Default | Stage | Effect |
-|---|---|---|---|
-| **Paths and inputs** | | | |
-| `PTD_DATA_DIR` | `data/` | all | Folder holding the dataset archive and all outputs (`stage/`, `out/`, `raw/`) |
-| `PTD_RATE_FILE` / `PTD_RATE_MEMBER` | C2's queued file | C4 | Grade/extract a different TiC file (a path, or a member inside the archive) |
-| `PTD_C4_OUTPUT_DIR` | `data/stage/c4` | C4 | Where C4 writes its outputs |
-| `PTD_REVALIDATION_ZIP` / `PTD_MEDICARE_PROVIDER_ZIP` / `PTD_PECOS_ENROLLMENT_ZIP` | archive `cms/` member | C5 | Use a standalone CMS file instead of the copy inside the archive |
-| **Reproducibility** | | | |
-| `PTD_AS_OF` | today | C3 | Fixed reference date for freshness and expiry scoring |
-| **C3 grading** | | | |
-| `PTD_C3_WORKERS` | `1` | C3 | Files graded in parallel |
-| `PTD_C3_SAMPLE_EVERY` / `PTD_C3_BLOCK_SIZE` | `1` / `1000` | C3 | Diagnostic sampling: keep 1 block in N. C4 rejects sampled grades |
-| `PTD_C3_ROW_FLAG_LIMIT` | `0` (no cap) | C3 | Cap on exception examples written (counts are always exact) |
-| `PTD_C3_MAX_OUTLIER_COHORTS` | `0` (no cap) | C3 | Cap on outlier cohorts kept in memory |
-| **C5 address sources** | | | |
-| `PTD_NPD_API` | `1` (on) | C5 | CMS National Provider Directory lookups; `0` disables them |
-| `PTD_NPD_MAX_NPIS` | `0` (all) | C5 | Maximum uncached NPIs fetched per run |
-| `PTD_NPD_WORKERS` | `4` | C5 | Concurrent NPD requests |
-| `PTD_NPD_BASE_URL` | `https://directory.cms.gov/fhir` | C5 | NPD FHIR endpoint |
-| `PTD_GEOCODE` | `1` (on) | C5 | Census geocoding of candidate addresses; `0` disables it |
-| `PTD_GEOCODE_WORKERS` / `PTD_GEOCODE_TIMEOUT` | `8` / `5` s | C5 | Geocoder concurrency and per-request timeout |
-| **Health Net directory (`c5hn`)** | | | |
-| `HN_TARGET_NETWORK_IDS` | `8201,8203` | c5hn | Health Net product networks treated as the target PPO |
-| `PTD_HN_APP_JS` | `data/raw/healthnet_pces/app.js` | c5hn (live only) | Saved Find-a-Provider web bundle the live API key is read from. Offline replay doesn't need it |
-| **Copilot and dashboard (optional)** | | | |
-| `LOCAL_LLM_MODEL` | `qwen2.5:1.5b` | RAG, web | Ollama model used for answers |
-| `LOCAL_LLM_URL` | `http://127.0.0.1:11434` | RAG, web | Ollama endpoint |
-| `RAG_DAEMON_URL` | `http://127.0.0.1:8005` | web | RAG service the dashboard's copilot calls |
-| `PTD_REPO_ROOT` | `..` (from `web/`) | web | Repository root, for dashboard routes that call Python |
-| `UV_BIN` / `PYTHON_BIN` | `uv` / `python3` | web | Executables the dashboard uses to call Python |
-
-**Offline by default.** The archive's `caches/` folder holds the CMS NPD responses (3,734 NPIs) and Census geocodes (5,412 addresses) from the 2026-10-18 run, and `healthnet/` holds the Health Net directory responses. C5 seeds its local caches from them on first run, keeping any newer local entries. So a fresh machine reproduces the shipped results **without calling any API**, and live calls happen only for NPIs or addresses not yet cached.
-
-**Live Health Net refresh (optional).** `make c5hn` replays the responses archived in the dataset, so a clean clone reproduces the 2026-10-18 result offline. To refresh from the live directory, run `uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5`. There are no hard caps on `--workers` or `--rps`, and every result page is fetched. The defaults stay polite because a live API that is hammered starts refusing requests. Every response is cached.
+**Live Health Net refresh (optional).** `make c5hn` replays the responses archived in the dataset, so a clean clone reproduces the 2026-10-18 result offline. To refresh from the live directory, run `uv run python -m pipeline.stages.c5_healthnet --workers 16 --rps 5`. It is rate-limited and caches every response.
 
 ---
 
 ## 5. Data sources
 
-All inputs ship inside **one archive** (2.39 GB, 136 members), including the API response caches (`healthnet/`, `caches/`). Sizes and SHA-256 hashes are listed in `MANIFEST*.txt` inside it.
+All inputs ship inside **one archive** (2.28 GB, 133 members). Sizes and SHA-256 hashes are listed in `MANIFEST*.txt` inside it.
 
 ### 5.1 Provided by the problem statement
 
@@ -466,7 +439,7 @@ cd web && npm install && npm run dev          # Next.js dashboard (overview, rat
 - **Every rule has an ID and evidence.** Recorded in `docs/DECISIONS.md` with the rule, the reason, the evidence query or result, the alternatives rejected and the risk.
 - **Honest outputs.** Unknown is `None`, not 0 or 100. Absence of evidence is never scored as good, and every fallback is counted in the output.
 - **Reproducible.** One archive, config-driven paths, manifests with config hash and git SHA, `PTD_AS_OF` for date-dependent metrics, and an offline replay of the live directory evidence.
-- **Polite external calls, no hard caps.** Every source is on by default with no NPI or page limits. Live APIs default to a polite global rate (overridable), are retried with backoff, and are cached and resumable. The Health Net web key is read at runtime and never written to disk.
+- **Polite external calls.** Rate-limited (≤ 5 req/s globally), retried with backoff, cached, and resumable. The Health Net web key is read at runtime and never written to disk.
 
 ---
 

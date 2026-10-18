@@ -7,10 +7,8 @@ import gzip
 import hashlib
 import json
 import os
-import re
 import sqlite3
 import time
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,23 +22,8 @@ RAW_COLUMNS = (
     "source_file", "provider_group_id", "npi", "tin", "tin_type", "business_name",
     "billing_code", "billing_code_type", "billing_code_type_version", "billing_code_description",
     "negotiated_type", "negotiated_rate", "expiration_date", "service_code", "billing_class",
-    "setting", "modifiers", "additional_information", "negotiation_arrangement", "revenue_code",
+    "setting", "modifiers", "additional_information", "negotiation_arrangement",
 )
-
-# R-C4-02: a revenue-code (RC) line names a hospital department; the procedure it prices is the
-# CPT/HCPCS code in additional_information (1.12M of 1.5M HN CA records). Selecting one rate per
-# (NPI, TIN, revenue code) collapsed different procedures into one arbitrary rate and C6 then dropped
-# every RC row; unwrapping makes the procedure the billing code and keeps the revenue code alongside.
-CPT_RE = re.compile(r"^(\d{4}[0-9A-Z]|[A-Z]\d{4})$")
-
-
-def _effective_code(billing_code, billing_code_type, additional_information):
-    """(billing_code, billing_code_type, revenue_code) for one price."""
-    ai = (additional_information or "").strip().upper()
-    if billing_code_type.strip().upper() == "RC" and CPT_RE.match(ai):
-        return ai, ("HCPCS" if ai[0].isalpha() else "CPT"), billing_code
-    return billing_code, billing_code_type, ""
-
 
 CURATED_COLUMNS = tuple(c for c in RAW_COLUMNS if c != "expiration_date") + (
     "selection_rule",
@@ -312,7 +295,7 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
             billing_code_type_version TEXT, billing_code_description TEXT,
             negotiated_type TEXT, negotiated_rate_raw TEXT, negotiated_rate_num REAL,
             expiration_date TEXT, service_code TEXT, billing_class TEXT, setting TEXT,
-            modifiers TEXT, additional_information TEXT, negotiation_arrangement TEXT, revenue_code TEXT
+            modifiers TEXT, additional_information TEXT, negotiation_arrangement TEXT
         )"""
     )
 
@@ -340,8 +323,8 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
                     billing_code, billing_code_type, billing_code_type_version,
                     billing_code_description, negotiated_type, negotiated_rate_raw,
                     negotiated_rate_num, expiration_date, service_code, billing_class,
-                    setting, modifiers, additional_information, negotiation_arrangement, revenue_code
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    setting, modifiers, additional_information, negotiation_arrangement
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 db_batch,
             )
             conn.commit()
@@ -384,12 +367,7 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
                         setting = _text(price.get("setting"))
                         modifiers = _modifiers(price.get("billing_code_modifier"))
                         additional_information = _additional(price.get("additional_information"))
-                        eff_code, eff_type, revenue_code = _effective_code(
-                            billing_code, billing_code_type, additional_information)
                         price_rows.append({
-                            "billing_code": eff_code,
-                            "billing_code_type": eff_type,
-                            "revenue_code": revenue_code,
                             "negotiated_type": negotiated_type,
                             "negotiated_rate_raw": rate_raw,
                             "negotiated_rate_num": rate_num,
@@ -433,8 +411,8 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
                                         "tin": tin_value,
                                         "tin_type": tin_type,
                                         "business_name": business_name,
-                                        "billing_code": price["billing_code"],
-                                        "billing_code_type": price["billing_code_type"],
+                                        "billing_code": billing_code,
+                                        "billing_code_type": billing_code_type,
                                         "billing_code_type_version": billing_code_type_version,
                                         "billing_code_description": description,
                                         "negotiated_type": price["negotiated_type"],
@@ -446,18 +424,17 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
                                         "modifiers": price["modifiers"],
                                         "additional_information": price["additional_information"],
                                         "negotiation_arrangement": negotiation_arrangement,
-                                        "revenue_code": price["revenue_code"],
                                     }
                                     raw_writer.writerow(row)
                                     raw_count += 1
                                     db_batch.append((
                                         source_name, _text(ref_id), npi_text, tin_value, tin_type,
-                                        business_name, price["billing_code"], price["billing_code_type"],
+                                        business_name, billing_code, billing_code_type,
                                         billing_code_type_version, description, price["negotiated_type"],
                                         price["negotiated_rate_raw"], price["negotiated_rate_num"],
                                         price["expiration_date"], price["service_code"], price["billing_class"],
                                         price["setting"], price["modifiers"], price["additional_information"],
-                                        negotiation_arrangement, price["revenue_code"],
+                                        negotiation_arrangement,
                                     ))
                                     if len(db_batch) >= 1000:
                                         _flush_db_batch()
@@ -479,7 +456,7 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
         "billing_code", "billing_code_type", "billing_code_type_version",
         "billing_code_description", "negotiated_type", "negotiated_rate_raw",
         "expiration_date", "service_code", "billing_class", "setting", "modifiers",
-        "additional_information", "negotiation_arrangement", "revenue_code",
+        "additional_information", "negotiation_arrangement",
     )
     group_by = ", ".join(dup_fields)
     dup_sql = (f"SELECT COALESCE(SUM(c - 1), 0) FROM ("
@@ -508,7 +485,7 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
         "billing_code", "billing_code_type", "billing_code_type_version",
         "billing_code_description", "negotiated_type", "negotiated_rate_raw",
         "negotiated_rate_num", "expiration_date", "service_code", "billing_class",
-        "setting", "modifiers", "additional_information", "negotiation_arrangement", "revenue_code",
+        "setting", "modifiers", "additional_information", "negotiation_arrangement",
     ]
     col_sql = ", ".join(select_cols)
     order_sql = "npi, tin, billing_code, billing_code_type, billing_code_type_version, provider_group_id"
@@ -529,18 +506,15 @@ def run_c4(cfg, rate_file=None, output_dir=None, rate_member=None, **kwargs):
                 r["billing_code_type_version"], r["billing_code_description"],
                 r["negotiated_type"], r["negotiated_rate_raw"], r["expiration_date"],
                 r["service_code"], r["billing_class"], r["setting"], r["modifiers"],
-                r["additional_information"], r["negotiation_arrangement"], r["revenue_code"],
+                r["additional_information"], r["negotiation_arrangement"],
             )
             if sig not in candidate_map:
                 candidate_map[sig] = dict(r)
                 candidate_map[sig]["_freq"] = 0
             candidate_map[sig]["_freq"] += 1
         candidates = list(candidate_map.values())
-        # R-C4-SEL-05 "most common rate": how many source records carry this rate VALUE
-        rate_freq = Counter(r["negotiated_rate_raw"] for r in rows)
         for c in candidates:
             c["_rate_num"] = _number(c.get("negotiated_rate_raw"))
-            c["_freq"] = rate_freq[c.get("negotiated_rate_raw")]
         selected = min(candidates, key=_rank_key)
         rule = _selection_rule(candidates, selected)
         candidate_count = len(rows)

@@ -71,7 +71,10 @@ NPPES_MEMBER = "nppes/NPPES_Data_Dissemination_October_2026_V2.zip"
 DEFAULT_TARGET_NETWORK_IDS = ("8201", "8203")
 HN_ARCHIVE_MEMBER = "healthnet/healthnet_pces_responses_2026-10-18.zip"  # raw responses, inside the dataset
 HN_SNAPSHOT_DATE = "2026-10-18"  # date those responses were fetched; offline runs evaluate "current" as of it
+MAX_WORKERS = 16  # ponytail: politeness cap on a live third-party API; throughput is set by rps, not workers
+MAX_RPS = 5.0
 PAGE_SIZE = 100
+MAX_PAGES = 10  # ponytail: 1,000 hits/name cap; names past that are flagged HN_Truncated=yes
 
 CORP_SUFFIX = re.compile(
     r"\b(A\s+)?(PROFESSIONAL|MEDICAL|DENTAL|OPTOMETRIC|PSYCHOLOGICAL|NURSING|CHIROPRACTIC)?\s*"
@@ -340,7 +343,9 @@ class Client:
                ) -> tuple[list[dict[str, Any]], int, bool]:
         """All pages for one name. Returns (responses, totalHits, truncated)."""
         out, offset, total, size = [], 0, 0, PAGE_SIZE
-        while True:  # every page until the API reports no more hits
+        for _ in range(MAX_PAGES * 10):
+            if offset >= MAX_PAGES * PAGE_SIZE:
+                return out, total, True
             try:
                 d = self.post(name_query(name, offset, size, network_ids))
             except urllib.error.HTTPError as e:
@@ -356,6 +361,7 @@ class Client:
             offset += got
             if got < size or offset >= total:
                 return out, total, False
+        return out, total, True
 
 
 def build_lookup_input(archive: Path, npis: set[str]) -> dict[str, dict[str, str]]:
@@ -488,7 +494,7 @@ def run_c5_healthnet(cfg: Config, *, limit: int | None = None, only_npis: Iterab
     """offline=True rebuilds the evidence from the responses archived in the dataset (no API, no key),
     evaluated as of the snapshot date so a clean clone reproduces the 2026-10-18 result."""
     started = time.monotonic()
-    rps, workers = max(rps, 0.1), max(1, workers)
+    rps, workers = min(rps, MAX_RPS), max(1, min(workers, MAX_WORKERS))
     asof = asof or (HN_SNAPSHOT_DATE if offline else date.today().isoformat())
     out_dir = cfg.stage_dir("c5_healthnet")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -577,8 +583,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(prog="python -m pipeline.stages.c5_healthnet")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--npi", action="append", default=[])
-    ap.add_argument("--rps", type=float, default=3.0, help="total requests/s across all workers (default 3; be polite to a live API)")
-    ap.add_argument("--workers", type=int, default=8, help="concurrent NPIs in flight")
+    ap.add_argument("--rps", type=float, default=3.0, help=f"total requests/s across workers (max {MAX_RPS})")
+    ap.add_argument("--workers", type=int, default=8, help=f"concurrent NPIs in flight (max {MAX_WORKERS})")
     ap.add_argument("--quiet", action="store_true", help="only progress lines, no per-NPI detail")
     ap.add_argument("--offline", action="store_true",
                     help="rebuild from the responses archived in the dataset; no API calls, no key needed")
