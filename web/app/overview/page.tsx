@@ -65,10 +65,6 @@ export default function OverviewPage() {
 
   useEffect(() => {
     fetch("/api/c2").then((r) => r.ok ? r.json() : null).then((j) => { if (j) setC2(j); }).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    fetch("/api/c2").then((r) => r.ok ? r.json() : null).then((j) => { if (j) setC2(j); }).catch(() => {});
     fetch("/api/c2/nlp").then((r) => r.ok ? r.json() : null).then((j) => { if (j) setNlp(j); }).catch(() => {});
   }, []);
 
@@ -127,110 +123,7 @@ export default function OverviewPage() {
             </Card>
           </div>
         </div>
-        {/* C2 Network Summary */}
-      {c2 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>C2 PPO Network Classification</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {Object.entries(c2.network_type_counts || {}).map(([k, v]) => (
-                <div key={k} className="rounded-lg border p-3">
-                  <div className="text-xs text-muted-foreground">{k}</div>
-                  <div className="text-xl font-bold tabular-nums">{Number(v).toLocaleString()}</div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 text-sm text-muted-foreground">
-              Confidence: {Object.entries(c2.confidence_counts || {}).map(([k,v]) => `${k}: ${v}`).join(" · ")}
-            </div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              NLP score range: {c2.nlp_score_min?.toFixed(3)} – {c2.nlp_score_max?.toFixed(3)} (mean {c2.nlp_score_mean?.toFixed(3)})
-            </div>
-            <div className="h-40 mt-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={Object.entries(c2.confidence_counts || {}).map(([k,v]) => ({name:k, value:v}))}>
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#3B82F6" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card><CardContent className="p-6 text-muted-foreground">Loading C2 network data…</CardContent></Card>
-      )}
-      {c2 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>C2 PPO Network Classification</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {Object.entries(c2.network_type_counts || {}).map(([k, v]) => (
-                <div key={k} className="rounded-lg border p-3">
-                  <div className="text-xs text-muted-foreground">{k}</div>
-                  <div className="text-xl font-bold tabular-nums">{Number(v).toLocaleString()}</div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 text-sm text-muted-foreground">
-              Confidence: {Object.entries(c2.confidence_counts || {}).map(([k,v]) => `${k}: ${v}`).join(" · ")}
-            </div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              NLP score range: {c2.nlp_score_min?.toFixed(3)} – {c2.nlp_score_max?.toFixed(3)} (mean {c2.nlp_score_mean?.toFixed(3)})
-            </div>
-            <div className="mt-4 space-y-2">
-              {Object.entries(c2.confidence_counts || {}).map(([k, v]) => {
-                const max = Math.max(...Object.values(c2.confidence_counts || {}).map(Number));
-                const pct = max > 0 ? (Number(v) / max) * 100 : 0;
-                return (
-                  <div key={k} className="flex items-center gap-3">
-                    <span className="w-20 text-sm capitalize">{k}</span>
-                    <div className="flex-1 h-6 bg-muted rounded overflow-hidden">
-                      <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
-                    </div>
-                    <span className="text-sm tabular-nums w-12 text-right">{Number(v).toLocaleString()}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card><CardContent className="p-6 text-muted-foreground">Loading C2 network data…</CardContent></Card>
-      )}
-      {nlp && (
-        <Card>
-          <CardHeader>
-            <CardTitle>C2 NLP Score Distribution (from plan_network.parquet)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {nlp.histogram.map((b: any) => {
-                const max = Math.max(...nlp.histogram.map((x: any) => x.count));
-                const pct = max > 0 ? (b.count / max) * 100 : 0;
-                return (
-                  <div key={b.bin} className="flex items-center gap-3">
-                    <span className="w-16 text-xs tabular-nums">{b.bin}</span>
-                    <div className="flex-1 h-5 bg-muted rounded overflow-hidden">
-                      <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
-                    </div>
-                    <span className="text-xs tabular-nums w-10 text-right">{b.count}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="mt-3 text-sm text-muted-foreground">
-              {nlp.scored} of {nlp.total} plans scored. Top plan: {nlp.top_plans?.[0]?.plan_name} ({nlp.top_plans?.[0]?.nlp_score?.toFixed(3)})
-            </p>
-          </CardContent>
-        </Card>
-      )}
-    </DashboardLayout>
+      </DashboardLayout>
     );
   }
 
@@ -403,10 +296,10 @@ export default function OverviewPage() {
                       fileQuality.grade === "A"
                         ? "default"
                         : fileQuality.grade === "B"
-                        ? "secondary"
-                        : fileQuality.grade === "C"
-                        ? "outline"
-                        : "destructive"
+                          ? "secondary"
+                          : fileQuality.grade === "C"
+                            ? "outline"
+                            : "destructive"
                     }
                     className="text-lg px-3 py-1"
                   >
@@ -427,8 +320,8 @@ export default function OverviewPage() {
                           metric.status === "pass"
                             ? "default"
                             : metric.status === "warn"
-                            ? "secondary"
-                            : "destructive"
+                              ? "secondary"
+                              : "destructive"
                         }
                         className="text-xs"
                       >
@@ -465,33 +358,27 @@ export default function OverviewPage() {
                       className="w-full h-full rounded-full"
                       style={{
                         background: `conic-gradient(
-                          hsl(var(--status-corroborated)) 0deg ${
-                            (addressStatus.corroborated / addressStatus.total) * 360
+                          hsl(var(--status-corroborated)) 0deg ${(addressStatus.corroborated / addressStatus.total) * 360
                           }deg,
-                          hsl(var(--status-single)) ${
-                            (addressStatus.corroborated / addressStatus.total) * 360
-                          }deg ${
-                            ((addressStatus.corroborated + addressStatus.single_source) /
-                              addressStatus.total) *
-                            360
+                          hsl(var(--status-single)) ${(addressStatus.corroborated / addressStatus.total) * 360
+                          }deg ${((addressStatus.corroborated + addressStatus.single_source) /
+                            addressStatus.total) *
+                          360
                           }deg,
-                          hsl(var(--status-conflicting)) ${
-                            ((addressStatus.corroborated + addressStatus.single_source) /
-                              addressStatus.total) *
-                            360
-                          }deg ${
-                            ((addressStatus.corroborated +
-                              addressStatus.single_source +
-                              addressStatus.conflicting) /
-                              addressStatus.total) *
-                            360
+                          hsl(var(--status-conflicting)) ${((addressStatus.corroborated + addressStatus.single_source) /
+                            addressStatus.total) *
+                          360
+                          }deg ${((addressStatus.corroborated +
+                            addressStatus.single_source +
+                            addressStatus.conflicting) /
+                            addressStatus.total) *
+                          360
                           }deg,
-                          hsl(var(--status-unresolved)) ${
-                            ((addressStatus.corroborated +
-                              addressStatus.single_source +
-                              addressStatus.conflicting) /
-                              addressStatus.total) *
-                            360
+                          hsl(var(--status-unresolved)) ${((addressStatus.corroborated +
+                            addressStatus.single_source +
+                            addressStatus.conflicting) /
+                            addressStatus.total) *
+                          360
                           }deg 360deg
                         )`,
                       }}
@@ -500,10 +387,10 @@ export default function OverviewPage() {
                         <span className="text-2xl font-bold">
                           {addressStatus.total > 0
                             ? Math.round(
-                                ((addressStatus.corroborated + addressStatus.single_source) /
-                                  addressStatus.total) *
-                                  100
-                              )
+                              ((addressStatus.corroborated + addressStatus.single_source) /
+                                addressStatus.total) *
+                              100
+                            )
                             : 0}%
                         </span>
                       </div>
@@ -577,8 +464,8 @@ export default function OverviewPage() {
                           outlier.severity === "high"
                             ? "destructive"
                             : outlier.severity === "medium"
-                            ? "secondary"
-                            : "outline"
+                              ? "secondary"
+                              : "outline"
                         }
                         className="text-xs"
                       >
@@ -593,6 +480,35 @@ export default function OverviewPage() {
           </motion.div>
         </div>
       </motion.div>
-    </DashboardLayout>
+          {/* C2 Network Summary */}
+      {nlp && (
+        <Card>
+          <CardHeader>
+            <CardTitle>C2 NLP Score Distribution (from plan_network.parquet)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {nlp.histogram.map((b: any) => {
+                const max = Math.max(...nlp.histogram.map((x: any) => x.count));
+                const pct = max > 0 ? (b.count / max) * 100 : 0;
+                return (
+                  <div key={b.bin} className="flex items-center gap-3">
+                    <span className="w-16 text-xs tabular-nums">{b.bin}</span>
+                    <div className="flex-1 h-5 bg-muted rounded overflow-hidden">
+                      <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-xs tabular-nums w-10 text-right">{b.count}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-sm text-muted-foreground">
+              {nlp.scored} of {nlp.total} plans scored. Top plan: {nlp.top_plans?.[0]?.plan_name} ({nlp.top_plans?.[0]?.nlp_score?.toFixed(3)})
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+</DashboardLayout>
   );
 }
