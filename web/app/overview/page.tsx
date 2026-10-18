@@ -42,6 +42,7 @@ interface OverviewData {
 export default function OverviewPage() {
   const [data, setData] = useState<OverviewData | null>(null);
   const [c2, setC2] = useState<any>(null);
+  const [nlp, setNlp] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,7 +68,8 @@ export default function OverviewPage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/c2").then((r) => r.ok ? r.json() : null).then((j) => { if (j) { console.log("C2", j); setC2(j); } }).catch((e) => console.error("C2 fetch", e));
+    fetch("/api/c2").then((r) => r.ok ? r.json() : null).then((j) => { if (j) setC2(j); }).catch(() => {});
+    fetch("/api/c2/nlp").then((r) => r.ok ? r.json() : null).then((j) => { if (j) setNlp(j); }).catch(() => {});
   }, []);
 
   if (loading) {
@@ -200,6 +202,33 @@ export default function OverviewPage() {
         </Card>
       ) : (
         <Card><CardContent className="p-6 text-muted-foreground">Loading C2 network data…</CardContent></Card>
+      )}
+      {nlp && (
+        <Card>
+          <CardHeader>
+            <CardTitle>C2 NLP Score Distribution (from plan_network.parquet)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {nlp.histogram.map((b: any) => {
+                const max = Math.max(...nlp.histogram.map((x: any) => x.count));
+                const pct = max > 0 ? (b.count / max) * 100 : 0;
+                return (
+                  <div key={b.bin} className="flex items-center gap-3">
+                    <span className="w-16 text-xs tabular-nums">{b.bin}</span>
+                    <div className="flex-1 h-5 bg-muted rounded overflow-hidden">
+                      <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-xs tabular-nums w-10 text-right">{b.count}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-sm text-muted-foreground">
+              {nlp.scored} of {nlp.total} plans scored. Top plan: {nlp.top_plans?.[0]?.plan_name} ({nlp.top_plans?.[0]?.nlp_score?.toFixed(3)})
+            </p>
+          </CardContent>
+        </Card>
       )}
     </DashboardLayout>
     );
