@@ -251,7 +251,7 @@ def extract_chunks(root_dir: Path) -> list[dict[str, Any]]:
             "data/stage/c5/c5result.csv",
             "C5 Stage Data Catalog",
             (
-                "Table: c5_result (46,448 records linking NPI, TIN, Address, Specialty, Rate)\n"
+                "Table: c5_result (47,282 records linking NPI, TIN, Address, Specialty, Rate)\n"
                 "Columns:\n"
                 "- NPI (BIGINT): 10-digit Provider NPI (3,734 valid distinct NPIs)\n"
                 "- TIN (VARCHAR): Taxpayer ID (2,888 distinct TINs)\n"
@@ -259,8 +259,8 @@ def extract_chunks(root_dir: Path) -> list[dict[str, Any]]:
                 "- Billing_Code (VARCHAR): CPT/HCPCS billing code\n"
                 "- Specialty (VARCHAR): NUCC mapped clinical specialty (883 distinct taxonomy codes)\n"
                 "- Rate (DOUBLE): Curated negotiated rate\n"
-                "- Address_Status (VARCHAR): CORROBORATED (1,894), SINGLE_SOURCE (921), CONFLICTING (839), UNRESOLVED (121)\n"
-                "- Multi-Source Evidence: NPPES, NPPES Practice Location, CMS DAC, CMS Revalidation Reassignments (314 matches), CMS NPD API Location, HealthNet Directory (2,920 NPIs), Medicare 2024 Claims (504 NPIs), PECOS Enrollment (2,603 CA NPIs)\n"
+                "- Address_Status (VARCHAR): CORROBORATED (1,860), SINGLE_SOURCE (898), CONFLICTING (895), UNRESOLVED (122)\n"
+                "- Multi-Source Evidence: NPPES, NPPES Practice Location, CMS DAC, CMS Revalidation Reassignments (314 matches), CMS NPD API Location (754 records across all 3,734 cached NPIs), HealthNet Directory (2,920 NPIs), Medicare 2024 Claims (504 NPIs), PECOS Enrollment (2,603 CA NPIs)\n"
                 "- Selection_Rule (VARCHAR): Provenance selection rule from C4."
             ),
         ),
@@ -269,7 +269,7 @@ def extract_chunks(root_dir: Path) -> list[dict[str, Any]]:
             "data/out/final_provider_rates.xlsx",
             "C6 Stage Data Catalog",
             (
-                "Workbook: final_provider_rates.xlsx (11,408 final deduplicated provider rate rows)\n"
+                "Workbook: final_provider_rates.xlsx (11,413 final deduplicated provider rate rows)\n"
                 "Sheets:\n"
                 "1. Curated Rates: NPI, TIN, Address, Billing Code, Specialty, Rate, Address_Status, Selection_Rule\n"
                 "2. Data Quality: Stage C3 file scorecard, validation rates, duplicate rates\n"
@@ -281,12 +281,12 @@ def extract_chunks(root_dir: Path) -> list[dict[str, Any]]:
             "data/out/c7_cost_effectiveness.xlsx",
             "C7 Stage Data Catalog",
             (
-                "Workbook: c7_cost_effectiveness.xlsx (11,408 provider rates scored against CMS Medicare PFS)\n"
-                "Counts: 3,035 unique healthcare providers scored, 7,812 direct Medicare PFS matches, 154 locality fallbacks.\n"
+                "Workbook: c7_cost_effectiveness.xlsx (11,413 provider rates scored against CMS Medicare PFS)\n"
+                "Counts: 3,037 unique healthcare providers scored, 7,817 direct Medicare PFS matches, 154 locality fallbacks.\n"
                 "Benchmarking Tiers:\n"
-                "- Tier A (Specialty + Code Benchmark): 4,632 rows comparing provider rate to peer specialty median\n"
-                "- Tier B (Code-Only Peer Benchmark): 2,888 rows\n"
-                "- Tier C (Direct Medicare PFS Only): 292 rows\n"
+                "- Tier A (Specialty + Code Benchmark): 4,633 rows comparing provider rate to peer specialty median\n"
+                "- Tier B (Code-Only Peer Benchmark): 2,891 rows\n"
+                "- Tier C (Direct Medicare PFS Only): 293 rows\n"
                 "Key Metrics: Median Medicare Ratio is 1.51x base CMS fee schedule rate (Mean: 3.30x).\n"
                 "Detail File: data/stage/c7/c7_code_detail.csv contains granular npi, tin, billing_code, locality, medicare_ratio, tier."
             ),
