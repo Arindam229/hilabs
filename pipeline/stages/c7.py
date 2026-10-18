@@ -41,7 +41,7 @@ even for the largest cohort, ~980 rows):
 
   PPI_raw(p)      = weighted average of reference_ratio(p, c) over p's
                      priceable basket, weights = HiLabs SPEC_PROC_WEIGHT
-                     (default 1.0 for a PFS-matched code HiLabs didn't weight)
+                     (median HiLabs weight for a PFS-matched code HiLabs did not weight)
   Z_p             = W_p / (W_p + K_provider), K_provider = median basket
                      weight across ALL providers in this dataset (not
                      per-specialty -- most specialties are themselves too
@@ -74,6 +74,7 @@ from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
 from pipeline.config import Config
+from pipeline.io.archive import require_member
 from pipeline.io.manifest import write_manifest
 
 _sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -111,12 +112,10 @@ def extract_zip5(address: str) -> str | None:
 
 
 def _dataset_member(archive_path: Path, relative: str) -> str:
-    """Member path inside the outer archive for a file under the dataset's
-    top folder. Same convention c1-c6 use (hardcoded "hilabs_dataset_.../..."
-    member paths in e.g. c5_address.py), but the prefix is derived from the
-    configured archive's own filename instead of a second hardcoded literal,
-    so it can't silently drift out of sync with config.yaml."""
-    return f"{archive_path.stem}/{relative}"
+    """Member path inside the outer archive, found by path suffix (pipeline/io/archive.py), so the
+    archive's root folder name does not have to match its file name."""
+    with zipfile.ZipFile(archive_path) as z:
+        return require_member(z, relative)
 
 
 def _open_nested_zip(archive_path: Path, member: str) -> zipfile.ZipFile:
@@ -447,6 +446,12 @@ def aggregate_providers(
     for r in rows:
         by_npi[r["npi"]].append(r)
 
+    # HiLabs weights are raw volumes (median ~5.6M, max ~529M). A code HiLabs did not weight gets the
+    # median weight, not 1.0: on the raw scale 1.0 is ~0, which zeroed credibility and pinned 109
+    # providers (raw ratios 0.71x-31x) to exactly 1.00.
+    positive = [w for w in proc_weights.values() if w and w > 0]
+    default_weight = median(positive) if positive else DEFAULT_CODE_WEIGHT
+
     all_weights: list[float] = []
     provider_rows: list[dict[str, Any]] = []
     for npi, npi_rows in by_npi.items():
@@ -455,7 +460,7 @@ def aggregate_providers(
         weighted_sum = 0.0
         tier_weight: defaultdict[str, float] = defaultdict(float)
         for r in priced:
-            w = proc_weights.get(r["billing_code"], DEFAULT_CODE_WEIGHT)
+            w = proc_weights.get(r["billing_code"]) or default_weight
             weight_sum += w
             weighted_sum += w * r["reference_ratio"]
             tier_weight[r["tier"]] += w
@@ -489,7 +494,7 @@ def aggregate_providers(
         w = p["basket_weight"]
         if p["ppi_raw"] is None or w <= 0:
             p["z_credibility"] = 0.0
-            p["ppi_credible"] = 1.0
+            p["ppi_credible"] = None  # no priced code = no evidence; never scored as average
         else:
             z = w / (w + k_provider)
             p["z_credibility"] = round(z, 3)
@@ -510,12 +515,16 @@ def aggregate_providers(
         p["breadth_pct"] = round(100 * len(p["_distinct_codes"]) / len(universe), 1) if universe else 0.0
         del p["_distinct_codes"]
 
-    ppi_values = sorted(p["ppi_credible"] for p in provider_rows)
-    breadth_values = sorted(p["breadth_pct"] for p in provider_rows)
+    scored = [p for p in provider_rows if p["ppi_credible"] is not None]
+    ppi_values = sorted(p["ppi_credible"] for p in scored)
+    breadth_values = sorted(p["breadth_pct"] for p in scored)
     ppi_median = ppi_values[len(ppi_values) // 2] if ppi_values else 1.0
     breadth_median = breadth_values[len(breadth_values) // 2] if breadth_values else 0.0
 
     for p in provider_rows:
+        if p["ppi_credible"] is None:
+            p["quadrant"] = "Insufficient data"
+            continue
         low_price = p["ppi_credible"] <= ppi_median
         high_breadth = p["breadth_pct"] >= breadth_median
         if low_price and high_breadth:
@@ -527,7 +536,7 @@ def aggregate_providers(
         else:
             p["quadrant"] = "Niche Watchlist"
 
-    provider_rows.sort(key=lambda p: p["ppi_credible"])
+    provider_rows.sort(key=lambda p: (p["ppi_credible"] is None, p["ppi_credible"] or 0.0))
     return provider_rows, k_provider
 
 
