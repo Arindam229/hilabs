@@ -341,6 +341,44 @@ The reason is structural, not just a score. Plan names are short, coded strings 
 - **Small models.** A ~1.5B-parameter LLM and a 22M-parameter embedder run on a laptop CPU.
 - **Grounded answers.** The copilot's system prompt tells it to answer from the retrieved project documents, the exact DuckDB record lookups and benchmark figures, and to cite rule IDs. So it explains the pipeline from the pipeline's own evidence rather than from general knowledge.
 
+### 8.1 Pipeline Copilot (RAG chatbot on Qwen 2.5)
+
+A local question-answering assistant over the pipeline's own evidence. Ask it "why was NPI 1780886424 matched to Harvard Blvd?", "what is the rate for 99214?" or "how was C3 scored?", and it answers from the project's rules and outputs.
+
+**How one question is answered** (`pipeline/rag/engine.py · ask_rag`):
+
+```text
+question ─┬─► 1. Record lookup (DuckDB) ── an NPI (1XXXXXXXXX), TIN (XX-XXXXXXX) or billing code in the question
+          │                                 → parameterised SQL over the C5/C6/C7 outputs (rows, rates, specialty, C7 tier)
+          ├─► 2. Semantic retrieval ────── all-MiniLM-L6-v2 embeds the question → cosine similarity against the
+          │                                 indexed chunks → top-k = 4 chunks (source, section, score)
+          └─► 3. Grounded prompt ────────── system prompt = benchmark figures + live records + the 4 chunks
+                                            → Qwen 2.5 via Ollama → answer + cited sources + latency/tokens
+```
+
+If Ollama is offline, the copilot does not fail. It returns the live records plus the retrieved chunks as a structured summary (`fallback_answer_from_chunks`).
+
+**Specifics (from the code):**
+
+| Setting | Value | Where |
+|---|---|---|
+| Generation model | **`qwen2.5:1.5b`** (Qwen 2.5, 1.5B parameters, instruct). If that exact tag is missing, the first installed `qwen*` model is used | `engine.py · DEFAULT_MODEL`, `resolve_model_name` |
+| Serving | Ollama `/api/generate`, non-streaming, `temperature = 0.2`, 30 s timeout | `engine.py · query_ollama` |
+| Embedding model | **`all-MiniLM-L6-v2`** (sentence-transformers, 384-dim, unit-normalised vectors) | `indexer.py · EMBEDDING_MODEL_NAME` |
+| Retrieval | Cosine similarity (dot product of normalised vectors), **top-k = 4** (`top_k` per request) | `indexer.py · retrieve` |
+| Knowledge indexed | `docs/DECISIONS.md` (by rule), `docs/ps/DATA_FINDINGS.md`, `docs/ps/PROBLEM_STATEMENT.md` (by section), `docs/deliverables/file_quality_metrics.md`, every stage `_manifest.json` / `*summary.json`, and the output workbooks | `indexer.py · extract_chunks`, `get_watched_files` |
+| Index cache | `data/rag/rag_index.parquet` + `rag_meta.json`. It is rebuilt automatically when any watched file's modification time changes | `indexer.py · build_or_load_index`, `is_index_stale` |
+| Record lookups | NPI `\b1\d{9}\b`, TIN `\b\d{2}-\d{7}\b`, billing code (3–5 chars plus a code/price word), plus specialty, plan, file-quality and C7 queries, all parameterised DuckDB SQL | `data_records.py · detect_and_query_data` |
+| Service | `python -m pipeline.rag.server` on **`127.0.0.1:8005`**: `GET /health`, `POST /query` (`{"query", "top_k", "model"}`), `POST /sync` (rebuild index) | `server.py` |
+| Dashboard link | `web/app/api/copilot` → `RAG_DAEMON_URL` (default `http://127.0.0.1:8005`) and `LOCAL_LLM_URL` (default `http://127.0.0.1:11434`) | `web/app/api/copilot/route.ts` |
+
+**Model weights:**
+
+| Model | Role | Size | Get the weights |
+|---|---|---|---|
+| Qwen 2.5 1.5B Instruct (`qwen2.5:1.5b`) | Answer generation | 1.5B parameters (Ollama ships a quantised build of about 1 GB) | `ollama pull qwen2.5:1.5b` · [Ollama library](https://ollama.com/library/qwen2.5) · [Hugging Face](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) · **Team mirror: _link to be added_** |
+| all-MiniLM-L6-v2 | Retrieval embeddings, plus the C2 `nlp_score` | 22M parameters, 384-dim (about 90 MB) | Downloaded automatically by sentence-transformers on first use · [Hugging Face](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) · **Team mirror: _link to be added_** |
+
 **Running the copilot and dashboard (optional):**
 
 ```bash
