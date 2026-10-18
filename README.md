@@ -4,6 +4,8 @@
 
 Built for the HiLabs *Data Pipeline Curation for Provider Rates* hackathon (AI Quest). Scope: **Centene · California · Commercial group · PPO**, Type 1 and Type 2 NPIs.
 
+**🎥 [Video walkthrough](https://vimeo.com/1237029700) · 📦 [Dataset archive (Google Drive)](https://drive.google.com/drive/folders/1qnCJsUgaENz8kRgMfdi7QzWZGBIhKM8o?usp=sharing) · 🖥️ [Source code](https://github.com/sivk-kex/hilabs)**
+
 ```text
 Centene index files ─► C1 parse ─► C2 PPO network ─► C3 grade files ─► C4 extract rates
                                                                             │
@@ -146,7 +148,7 @@ flowchart LR
 | `uv` | any recent | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | `git`, `make`, `unzip` | any | `sudo apt install git make unzip` (macOS: `xcode-select --install`) |
 | Disk / RAM | about **5 GB** free (2.4 GB archive + about 2 GB outputs), **8 GB+** RAM | — |
-| Dataset archive | `hilabs_dataset_2026-10-17.zip` (2.39 GB, 136 members) | Download link: **_to be added_** |
+| Dataset archive | `hilabs_dataset_2026-10-17.zip` (2.39 GB, 136 members) | **[Download from Google Drive](https://drive.google.com/drive/folders/1qnCJsUgaENz8kRgMfdi7QzWZGBIhKM8o?usp=sharing)** |
 | *Optional:* Ollama | latest | `curl -fsSL https://ollama.com/install.sh \| sh` (or https://ollama.com/download) |
 | *Optional:* Node.js | 18.18+ (for the Next.js 15 dashboard) | https://nodejs.org |
 
@@ -159,6 +161,7 @@ make setup                                    # uv sync --all-groups: creates .v
 make test                                     # ruff + pytest; should pass before any data is present
 
 mkdir -p data
+# download hilabs_dataset_2026-10-17.zip from the Google Drive link above, then:
 mv ~/Downloads/hilabs_dataset_2026-10-17.zip data/          # or: export PTD_DATA_DIR=/folder/containing/the/zip
 unzip -l data/hilabs_dataset_2026-10-17.zip | tail -1       # expect: 136 files
 unzip -p data/hilabs_dataset_2026-10-17.zip hilabs_dataset_2026-10-17/MANIFEST_additions_2026-10-18.txt | head -5
@@ -501,8 +504,8 @@ If Ollama is offline, the copilot does not fail. It returns the live records plu
 
 | Model | Role | Size | Get the weights |
 |---|---|---|---|
-| Qwen 2.5 1.5B Instruct (`qwen2.5:1.5b`) | Answer generation | 1.5B parameters (Ollama ships a quantised build of about 1 GB) | `ollama pull qwen2.5:1.5b` · [Ollama library](https://ollama.com/library/qwen2.5) · [Hugging Face](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) · **Team mirror: _link to be added_** |
-| all-MiniLM-L6-v2 | Retrieval embeddings, plus the C2 `nlp_score` | 22M parameters, 384-dim (about 90 MB) | Downloaded automatically by sentence-transformers on first use · [Hugging Face](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) · **Team mirror: _link to be added_** |
+| Qwen 2.5 1.5B Instruct (`qwen2.5:1.5b`) | Answer generation | 1.5B parameters (Ollama ships a quantised build of about 1 GB) | `ollama pull qwen2.5:1.5b` · [Ollama library](https://ollama.com/library/qwen2.5) · [Hugging Face](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) |
+| all-MiniLM-L6-v2 | Retrieval embeddings, plus the C2 `nlp_score` | 22M parameters, 384-dim (about 90 MB) | Downloaded automatically by sentence-transformers on first use · [Hugging Face](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) |
 
 **What Ollama downloads for `qwen2.5:1.5b`** (from the registry manifest, fetched 2026-10-18):
 
@@ -542,7 +545,7 @@ cd web && npm install && npm run dev          # Next.js dashboard (overview, rat
 | 2 | Logic file (PPO network; TIN → NPI → address) | §7 above · `docs/DECISIONS.md` (every rule ID with evidence) |
 | 3 | File quality metrics | `docs/deliverables/file_quality_metrics.md` · `data/stage/c3/file_metrics.parquet` |
 | 4 | Summary metrics | §1 above · `data/stage/*/_manifest.json` |
-| 5 | Video | — |
+| 5 | Video | **[Watch on Vimeo](https://vimeo.com/1237029700)** |
 | 6 | Re-runnable code repo | This repo: `make pipeline`, no hardcoded paths |
 | 7 | Brownie points | (a) Next.js dashboard + local RAG copilot (`web/`, `pipeline/rag/`, §8) · (b) C7 → `data/out/c7_cost_effectiveness.xlsx` |
 
