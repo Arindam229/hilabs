@@ -151,41 +151,6 @@ def test_pointer_integrity_detects_orphan_reference(tmp_path: Path):
 
 # --------------------------------------------------------------------------
 # --------------------------------------------------------------------------
-# #5 unrecognized-code rate
-# --------------------------------------------------------------------------
-
-
-def test_unrecognized_code_rate_none_when_no_reference_sheet(tmp_path: Path):
-    archive = tmp_path / "source.zip"
-    member = _archive(archive, [_item("A", provider_refs=(1,))], declared_provider_groups=[1])
-    result = grade_member(archive, member, "url", tmp_path / "db.sqlite", hilabs_weights=None)
-    assert result["unrecognized_code_rate_pct"] is None
-    assert result["unrecognized_code_count"] is None
-
-
-def test_unrecognized_code_rate_computed_against_reference_set(tmp_path: Path):
-    archive = tmp_path / "source.zip"
-    items = [_item("A", provider_refs=(1,)), _item("B", provider_refs=(1,))]
-    member = _archive(archive, items, declared_provider_groups=[1])
-    result = grade_member(
-        archive, member, "url", tmp_path / "db.sqlite", hilabs_weights={"A": 10.0}
-    )
-    # "B" is not in the reference set -> 1 of 2 codes unrecognized = 50%
-    assert result["unrecognized_code_count"] == 1
-    assert result["unrecognized_code_rate_pct"] == 50.0
-
-
-def test_unrecognized_code_rate_zero_when_everything_matches(tmp_path: Path):
-    archive = tmp_path / "source.zip"
-    member = _archive(archive, [_item("A", provider_refs=(1,))], declared_provider_groups=[1])
-    result = grade_member(
-        archive, member, "url", tmp_path / "db.sqlite", hilabs_weights={"A": 10.0, "Z": 5.0}
-    )
-    assert result["unrecognized_code_count"] == 0
-    assert result["unrecognized_code_rate_pct"] == 0.0
-
-
-# --------------------------------------------------------------------------
 # PS-named "code coverage", weighted by HiLabs' claims-volume importance
 # (SPEC_PROC_WEIGHT) -- not just a flat is-it-present count.
 # --------------------------------------------------------------------------
