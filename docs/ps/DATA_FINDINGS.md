@@ -24,6 +24,11 @@ Facts about the real files. Mark each **verified** (with how) or **hypothesis**.
   - In sample: `negotiated_type` all `negotiated`; `billing_class` 2,590 institutional / 14 professional;
     `expiration_date` all `9999-12-31` (so expiration is useless for staleness — use `last_updated_on`,
     contract signals, and cross-file comparison instead).
+- **CMS Revalidation Reassignment List** (2026-10 release, direct ZIP stream): 3,634,486 rows in a
+  621 MB CP1252 CSV. Fields include Individual NPI, Group PAC ID, enrollment IDs and group legal name,
+  but no numeric TIN and no street address. Against C4's 3,734 NPIs, 207 NPIs match 314 reassignment
+  rows spanning 250 Group PAC IDs. Exact `(NPI, Group PAC ID)` linkage to CMS DAC supplies address
+  evidence for a limited Medicare-covered subset; it supports but does not directly verify TIN ownership.
 
 ## Hypotheses (unconfirmed — test before relying on them)
 

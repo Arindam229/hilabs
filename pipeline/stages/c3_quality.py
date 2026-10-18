@@ -9,6 +9,7 @@ import json
 import math
 import os
 import random
+import re
 import sqlite3
 import time
 import zipfile
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import ijson
+import openpyxl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -29,6 +31,33 @@ from pipeline.stages.c1_index import StageResult
 
 IDENTITY_BATCH_SIZE = 500
 OUTLIER_RESERVOIR_SIZE = 512
+
+# CMS "facility" place-of-service codes: when a professional claim is
+# rendered at one of these, the physician doesn't bear practice-expense
+# overhead (the facility does), so the PFS facility PE RVU applies, not
+# the non-facility one. Picking facility-vs-nonfacility by billing_class
+# instead of place-of-service was the bug: a professional claim rendered
+# in a hospital (service_code 21) still needs the facility rate, and an
+# institutional (hospital's own) claim was never comparable to ANY PFS
+# number -- the Physician Fee Schedule only prices physician payment,
+# never a facility's own charge (that's OPPS/IPPS, a different system
+# entirely; confirmed on our file: institutional billing_codes here are
+# true revenue codes and never structurally match PFS, so this bug has
+# zero *current* impact, but it's still wrong reasoning worth fixing for
+# any other file this pipeline runs against).
+FACILITY_POS = {
+    "19", "21", "22", "23", "24", "26", "31", "34", "41", "42", "51", "52", "53", "56", "61",
+}
+
+# Matches a plain CPT (5 digits, e.g. "99213") or HCPCS (letter + 4 digits,
+# e.g. "G0162") code shape. Used only to recover the real procedure code
+# from additional_information on institutional (revenue-code) rows --
+# verified against the real file: 74.9% of all prices have billing_code
+# set to a revenue code (e.g. "110") with the real CPT/HCPCS sitting in
+# additional_information instead. Without this, code coverage was being
+# computed almost entirely against revenue codes, which was never going
+# to match a CPT-focused reference sheet.
+CPT_RE = re.compile(r"^(\d{4}[0-9A-Z]|[A-Z]\d{4})$")
 FLAG_SCHEMA = pa.schema(
     (
         pa.field("archive_member", pa.string()),
@@ -45,32 +74,61 @@ def _open_member(archive_path: Path, member: str):
     return archive, archive.open(member)
 
 
-def _header(archive_path: Path, member: str) -> dict[str, str]:
+def _header(archive_path: Path, member: str) -> tuple[dict[str, str], set[str]]:
+    """Preamble-only scan (stops the instant in_network starts, so this
+    never touches the multi-hundred-MB part of the file). Also collects
+    every top-level provider_group_id while we're already reading this
+    small section -- that's the "declared" side of the pointer-hygiene
+    check (metric #4): does every provider reference a price makes
+    actually resolve to something that exists?
+    """
     archive, stream = _open_member(archive_path, member)
     try:
         header: dict[str, str] = {}
+        declared_provider_groups: set[str] = set()
         for prefix, event, value in ijson.parse(stream):
             if prefix in {"version", "last_updated_on"} and event == "string":
                 header[prefix] = str(value)
+            if prefix == "provider_references.item.provider_group_id" and event == "number":
+                declared_provider_groups.add(str(value))
             if prefix == "in_network" and event == "start_array":
                 break
-        return header
+        return header, declared_provider_groups
     finally:
         stream.close()
         archive.close()
 
 
-def _freshness_score(last_updated_on: str) -> float | None:
+def _as_of(env_value: str | None) -> date:
+    """PTD_AS_OF, defaulting to today -- a fixed reference date so freshness
+    and expired-rate scores don't silently drift every time the pipeline is
+    rerun on a different day against the same unchanged file."""
+    if env_value:
+        try:
+            return date.fromisoformat(env_value)
+        except ValueError:
+            pass
+    return date.today()
+
+
+def _freshness_score(last_updated_on: str, as_of: date) -> float | None:
     if not last_updated_on:
         return None
     try:
-        age = max(0, (date.today() - datetime.strptime(last_updated_on, "%Y-%m-%d").date()).days)
+        age = max(0, (as_of - datetime.strptime(last_updated_on, "%Y-%m-%d").date()).days)
     except ValueError:
         return None
     return max(0.0, 100.0 - max(0, age - 30) * 2.0)
 
 
 def _identity(item: dict[str, Any], refs: object, price: dict[str, Any]) -> str:
+    # description is deliberately excluded: it's free text that can vary
+    # (whitespace, casing, revision wording) between two prices that are
+    # otherwise the exact same negotiated fact. Including it would let
+    # cosmetic text differences mask real duplicates -- additional_information
+    # and billing_code_modifier are included instead because on real files
+    # they carry distinguishing identity (e.g. DRG severity sub-codes) that
+    # description does not.
     payload = {
         "billing_code": item.get("billing_code"),
         "provider_references": refs or [],
@@ -156,15 +214,27 @@ def _reservoir_add(
     cohort: tuple[str, str, str],
     rate: float,
     rng: random.Random,
-) -> None:
+    max_cohorts: int,
+) -> bool:
+    """Returns False (and tracks nothing) if `cohort` is new and the
+    cohort-count cap has already been reached -- bounds total memory
+    regardless of how many distinct (code, billing_class, negotiated_type)
+    combinations a file contains. Per-cohort sample size was already
+    bounded (OUTLIER_RESERVOIR_SIZE); this bounds the number of cohorts
+    too, since that scales with code diversity, not row count or file
+    size -- verified on a real 513MB file with 6,068 distinct codes.
+    """
+    if cohort not in reservoirs and len(reservoirs) >= max_cohorts:
+        return False
     observed[cohort] += 1
     values = reservoirs[cohort]
     if len(values) < OUTLIER_RESERVOIR_SIZE:
         values.append(rate)
-        return
+        return True
     replacement = rng.randrange(observed[cohort])
     if replacement < OUTLIER_RESERVOIR_SIZE:
         values[replacement] = rate
+    return True
 
 
 def _cohort_outlier_estimate(
@@ -212,7 +282,24 @@ def _load_medicare_lookup(archive_path: Path) -> dict[str, tuple[float, float]] 
                         required = {"HCPCS", "STATUS CODE", "WORK RVU", "NON-FAC PE RVU", "FACILITY PE RVU", "MP RVU", "CONV FACTOR"}
                         if not required <= set(columns):
                             return None
+                        mod_index = columns.get("MOD")
                     elif columns and len(row) > max(columns.values()) and row[columns["STATUS CODE"]] in {"A", "R", "T"}:
+                        # 1,142 codes in the real PFS file (13% of it) have
+                        # MULTIPLE rows per HCPCS code, split by MOD into
+                        # global/"-26" (professional component)/"-TC"
+                        # (technical component) -- three genuinely different
+                        # dollar amounts for the same code. Without this
+                        # filter, whichever row happens to come last silently
+                        # overwrites the others; keeping only the unmodified
+                        # (global) row is the one unambiguous choice. MOD
+                        # isn't in `required` -- a layout without it just
+                        # means every row is treated as global, which is the
+                        # old (safe-default) behavior, not a hard failure.
+                        # Verified: 80 of our 775 real billing codes
+                        # (radiology/diagnostic codes) are affected.
+                        if mod_index is not None and len(row) > mod_index and row[mod_index].strip():
+                            previous = row
+                            continue
                         try:
                             work = float(row[columns["WORK RVU"]])
                             nonfac_pe = float(row[columns["NON-FAC PE RVU"]])
@@ -232,6 +319,50 @@ def _load_medicare_lookup(archive_path: Path) -> dict[str, tuple[float, float]] 
         return None
 
 
+def _load_hilabs_weights(archive_path: Path) -> dict[str, float] | None:
+    """PROC_CD -> SPEC_PROC_WEIGHT from HiLabs' own Spec-Proc Weights sheet
+    -- the PS's own supplied reference for which codes matter and how
+    much. Drives two PS-named metrics from one file read: code coverage
+    (is the claims-volume-weighted code universe represented in this
+    file?) and unrecognized-code rate (codes present here that HiLabs'
+    sheet has never heard of at all).
+    """
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            member = next(
+                name
+                for name in archive.namelist()
+                if name.endswith("Rate Benchmarking Individual Weights_Hackathon.xlsx")
+            )
+            payload = archive.read(member)
+        wb = openpyxl.load_workbook(io.BytesIO(payload), read_only=True)
+        ws = wb["Spec-Proc Weights"]
+        rows = ws.iter_rows(values_only=True)
+        header = next(rows)
+        columns = {str(name): index for index, name in enumerate(header)}
+        proc_index = columns.get("PROC_CD")
+        weight_index = columns.get("SPEC_PROC_WEIGHT")
+        if proc_index is None or weight_index is None:
+            return None
+        weights: dict[str, float] = {}
+        for row in rows:
+            proc = row[proc_index]
+            if not proc:
+                continue
+            try:
+                weight = float(row[weight_index])
+            except (TypeError, ValueError):
+                continue
+            # a PROC_CD can repeat across specialties; keep the larger
+            # weight so one code's coverage isn't underscored by a minor
+            # specialty's smaller claim on it
+            code = str(proc).strip()
+            weights[code] = max(weight, weights.get(code, 0.0))
+        return weights or None
+    except (KeyError, StopIteration, zipfile.BadZipFile, OSError):
+        return None
+
+
 def grade_member(
     archive_path: Path,
     member: str,
@@ -243,9 +374,13 @@ def grade_member(
     block_size: int = 1000,
     flag_limit: int = 100_000,
     medicare_rates: dict[str, tuple[float, float]] | None = None,
+    hilabs_weights: dict[str, float] | None = None,
+    max_outlier_cohorts: int = 50_000,
+    as_of: date | None = None,
 ) -> dict[str, object]:
     """Compute bounded-memory C3 metrics. Sampling is explicit; default scans every row."""
-    header = _header(archive_path, member)
+    as_of = as_of or _as_of(os.environ.get("PTD_AS_OF"))
+    header, declared_provider_groups = _header(archive_path, member)
     conn = sqlite3.connect(db_path)
     conn.execute("CREATE TABLE identities (key TEXT PRIMARY KEY)")
     if flags_path is None:
@@ -254,12 +389,30 @@ def grade_member(
     writer = pq.ParquetWriter(flags_path, FLAG_SCHEMA, compression="zstd")
     total = duplicates = zero_or_negative = invalid_rate = exception_rows = flags_written = 0
     scanned_items = sampled_items = medicare_matched = medicare_out_of_band = 0
+    no_real_expiration = 0
+    expired = 0
+    outlier_cohort_cap_skipped = 0
     codes: set[str] = set()
+    # Revenue-code items (billing_code_type "RC") carry their real
+    # CPT/HCPCS procedure identity in additional_information instead of
+    # billing_code -- verified on the real file: 74.9% of all 1.5M prices
+    # have this shape. coverage_codes recovers it where possible so code
+    # coverage isn't computed almost entirely against revenue codes
+    # (which were never going to match a CPT-focused reference sheet).
+    coverage_codes: set[str] = set()
     provider_refs: set[str] = set()
     rate_types: Counter[str] = Counter()
     billing_classes: Counter[str] = Counter()
     reservoirs: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     observed: Counter[tuple[str, str, str]] = Counter()
+    # Bounded by distinct-code cardinality (hundreds, not the 1.5M-row
+    # scale), so no reservoir sampling needed for any of these three --
+    # unlike the per-cohort rate reservoirs above, these can't grow with
+    # the file's row count.
+    item_code_counts: Counter[str] = Counter()
+    code_providers: defaultdict[str, set[str]] = defaultdict(set)
+    code_descriptions: defaultdict[str, set[str]] = defaultdict(set)
+    code_types: defaultdict[str, set[str]] = defaultdict(set)
     rng = random.Random(0)
     identity_batch: list[dict[str, object]] = []
     flag_batch: list[dict[str, object]] = []
@@ -273,15 +426,53 @@ def grade_member(
             code = str(item.get("billing_code") or "").strip()
             if code:
                 codes.add(code)
+                item_code_counts[code] += 1
+                description = item.get("description")
+                if description:
+                    code_descriptions[code].add(str(description))
+                code_type = item.get("billing_code_type")
+                if code_type:
+                    code_types[code].add(str(code_type))
             for negotiated_index, negotiated_rate in enumerate(item.get("negotiated_rates") or []):
                 refs = negotiated_rate.get("provider_references") or []
                 provider_refs.update(str(ref) for ref in refs)
+                if code:
+                    code_providers[code].update(str(ref) for ref in refs)
                 for price_index, price in enumerate(negotiated_rate.get("negotiated_prices") or []):
                     total += 1
                     price_type = str(price.get("negotiated_type") or "missing").lower()
                     billing_class = str(price.get("billing_class") or "missing").lower()
                     rate_types[price_type] += 1
                     billing_classes[billing_class] += 1
+                    expiration = price.get("expiration_date")
+                    if not expiration or expiration == "9999-12-31":
+                        no_real_expiration += 1
+                    else:
+                        # A REAL (non-sentinel) expiration date that's
+                        # already in the past -- the literal "stale
+                        # contracts" the PS names, distinct from file-level
+                        # freshness (which is about the file's own
+                        # last_updated_on, not any individual rate).
+                        try:
+                            if date.fromisoformat(str(expiration)[:10]) < as_of:
+                                expired += 1
+                        except ValueError:
+                            pass
+                    additional_info = str(price.get("additional_information") or "").strip().upper()
+                    if code:
+                        # Gated on billing_code_type == "RC": verified on the
+                        # real file that EVERY price whose additional_information
+                        # matches the CPT/HCPCS pattern is revenue-code-typed --
+                        # but that's a property of this file, not a guarantee.
+                        # Without the RC gate, a non-RC item whose
+                        # additional_information happens to collide with the
+                        # CPT pattern (a modifier, an NDC fragment, anything
+                        # 5 alphanumeric characters) would silently overwrite
+                        # a perfectly good billing_code on some other file.
+                        is_revenue_code = str(code_type or "").strip().upper() == "RC"
+                        coverage_codes.add(
+                            additional_info if is_revenue_code and CPT_RE.match(additional_info) else code
+                        )
                     position = f"{item_index}:{negotiated_index}:{price_index}"
                     base_flags: list[str] = []
                     try:
@@ -296,9 +487,24 @@ def grade_member(
                             base_flags.append("ZERO_OR_NEGATIVE_RATE")
                         else:
                             cohort = (code, billing_class, price_type)
-                            _reservoir_add(reservoirs, observed, cohort, value, rng)
-                            if medicare_rates and code in medicare_rates:
-                                benchmark = medicare_rates[code][1 if billing_class == "institutional" else 0]
+                            if not _reservoir_add(reservoirs, observed, cohort, value, rng, max_outlier_cohorts):
+                                outlier_cohort_cap_skipped += 1
+                            # The Physician Fee Schedule only prices
+                            # PHYSICIAN payment -- never a facility's own
+                            # charge (that's OPPS/IPPS, a different system).
+                            # Comparing an institutional claim to ANY PFS
+                            # number is a category error regardless of
+                            # which PE RVU column is picked, so this is
+                            # professional-only. Facility-vs-nonfacility
+                            # for a professional claim is chosen by place
+                            # of service (service_code), not billing_class
+                            # -- a doctor seeing a patient in a hospital
+                            # still uses the facility PE RVU even though
+                            # the claim itself is "professional".
+                            if medicare_rates and billing_class == "professional" and code in medicare_rates:
+                                pos = set(price.get("service_code") or [])
+                                facility = bool(pos & FACILITY_POS)
+                                benchmark = medicare_rates[code][1 if facility else 0]
                                 if benchmark > 0:
                                     medicare_matched += 1
                                     ratio = value / benchmark
@@ -346,16 +552,149 @@ def grade_member(
 
     validity = 100.0 * (1 - (zero_or_negative + invalid_rate) / total) if total else 0.0
     uniqueness = 100.0 * (1 - duplicates / total) if total else 0.0
-    rate_type = 100.0 * rate_types["negotiated"] / total if total else 0.0
-    freshness = _freshness_score(header.get("last_updated_on", ""))
+    # Any of "negotiated", "fee schedule", or "derived" resolves to a real
+    # dollar amount in negotiated_rate -- only "percentage" and "bundle"
+    # don't. Counting only "negotiated" understated this on real CMS files
+    # that legitimately use fee-schedule-referenced pricing.
+    dollar_rate_types = rate_types["negotiated"] + rate_types["fee schedule"] + rate_types["derived"]
+    freshness = _freshness_score(header.get("last_updated_on", ""), as_of)
     outlier_pct, outlier_support = _cohort_outlier_estimate(reservoirs, observed)
     outlier_sanity = None if outlier_pct is None else 100.0 - outlier_pct
     medicare_sanity = None
     if medicare_matched:
         medicare_sanity = 100.0 * (1 - medicare_out_of_band / medicare_matched)
-    components = [validity, uniqueness, rate_type]
-    components.extend(value for value in (freshness, outlier_sanity, medicare_sanity) if value is not None)
-    score = round(sum(components) / len(components), 1) if components else 0.0
+
+    # New diagnostics (not yet folded into quality_score -- reported
+    # alongside it so the existing score stays unchanged until that's a
+    # deliberate decision, not a side effect of adding more measurements).
+
+    # #1 item-repetition rate: what share of scanned item occurrences are
+    # a REPEAT of a billing code already seen as a separate top-level
+    # item, vs the file listing each code once. This is the structural
+    # root cause behind a high exact-duplicate rate, not just a symptom
+    # of it -- e.g. if code "23" appears as 76 separate item blocks,
+    # that's visible here directly, not just inferred from uniqueness.
+    item_repetition_rate_pct = (
+        round(100.0 * (sampled_items - len(codes)) / sampled_items, 4) if sampled_items else 0.0
+    )
+    most_repeated_code, most_repeated_code_count = (
+        item_code_counts.most_common(1)[0] if item_code_counts else (None, 0)
+    )
+
+    # #2 provider depth per code: average distinct providers priced per
+    # billing code. Good code coverage with shallow depth (each code
+    # priced for only 1-2 providers) is a materially different quality
+    # story than the same coverage with real network breadth per code.
+    avg_providers_per_code = (
+        round(sum(len(v) for v in code_providers.values()) / len(code_providers), 2)
+        if code_providers
+        else 0.0
+    )
+
+    # #3 code-description consistency: a billing code mapping to more than
+    # one description text within the same file is an internal red flag,
+    # independent of anything else measured here.
+    inconsistent_description_codes = sum(1 for v in code_descriptions.values() if len(v) > 1)
+    inconsistent_description_rate_pct = (
+        round(100.0 * inconsistent_description_codes / len(code_descriptions), 4)
+        if code_descriptions
+        else 0.0
+    )
+
+    # #4 pointer hygiene / referential integrity: every provider_group_id a
+    # price references should exist in the file's own declared list, and
+    # vice versa. A dangling reference means that price can never be
+    # joined to a provider downstream -- a structural defect nothing else
+    # here catches.
+    orphan_refs = provider_refs - declared_provider_groups
+    ghost_groups = declared_provider_groups - provider_refs
+    pointer_integrity_pct = round(
+        100.0
+        * (1 - (len(orphan_refs) + len(ghost_groups)) / max(1, len(declared_provider_groups))),
+        4,
+    )
+
+    # #5 unrecognized-code rate: share of distinct billing codes in this
+    # file that HiLabs' own Spec-Proc Weights sheet has never heard of.
+    # Uses coverage_codes, not codes: RC (revenue code) prices carry their
+    # real CPT/HCPCS identity in additional_information rather than
+    # billing_code -- verified on 74.9% of all prices in the real CA file
+    # -- so coverage_codes recovers that hidden identity where it's
+    # present and falls back to the top-level code otherwise. Using the
+    # raw billing_code set instead would flag almost every RC-typed code
+    # as "unrecognized" when it's actually a known CPT/HCPCS code wearing
+    # a revenue-code wrapper. None (not 0) when the reference sheet
+    # couldn't be loaded, so an absent benchmark is never confused with a
+    # clean result.
+    unrecognized_code_rate_pct = None
+    unrecognized_code_count = None
+    if hilabs_weights:
+        unrecognized = coverage_codes - hilabs_weights.keys()
+        unrecognized_code_count = len(unrecognized)
+        unrecognized_code_rate_pct = (
+            round(100.0 * len(unrecognized) / len(coverage_codes), 4) if coverage_codes else 0.0
+        )
+
+    # PS-named "code coverage", weighted by claims-volume importance
+    # (SPEC_PROC_WEIGHT) rather than a flat is-it-present count -- a code
+    # that drives a lot of real claims volume missing from this file
+    # matters more than a rarely-billed one. Uses the PS's own supplied
+    # reference dataset (HiLabs Spec-Proc Weights), not an invented
+    # universe, and coverage_codes rather than codes for the same
+    # RC-unwrapping reason as unrecognized_code_rate_pct above. None when
+    # the reference sheet is unavailable.
+    code_coverage_weighted_pct = None
+    if hilabs_weights:
+        total_weight = sum(hilabs_weights.values())
+        matched_weight = sum(hilabs_weights[c] for c in coverage_codes if c in hilabs_weights)
+        code_coverage_weighted_pct = round(100.0 * matched_weight / total_weight, 4) if total_weight else None
+
+    # #6 expiration transparency: share of prices carrying a REAL
+    # validity-period (not the 9999-12-31 sentinel or a missing value).
+    # Different question from file-level freshness -- that asks "when was
+    # the file updated"; this asks "does each individual rate tell you
+    # how long it's actually good for." A low number means the file gives
+    # no way to know if any given rate might change tomorrow.
+    expiration_transparency_pct = round(100.0 * (total - no_real_expiration) / total, 4) if total else 0.0
+
+    # #7 code-type collision rate: does the same billing_code value ever
+    # appear under more than one billing_code_type in this file? Your own
+    # C4 stage keys rate selection on (code, code_type, code_type_version)
+    # specifically because billing_code alone isn't always a safe
+    # identifier -- this checks whether that caution was actually needed
+    # for this file.
+    code_type_collisions = sum(1 for types in code_types.values() if len(types) > 1)
+    code_type_collision_rate_pct = (
+        round(100.0 * code_type_collisions / len(code_types), 4) if code_types else 0.0
+    )
+
+    expired_rate_pct = round(100.0 * expired / total, 4) if total else 0.0
+
+    # Weighted blend, not a flat average: code_coverage_weighted_pct is
+    # weighted highest because the PS names "code coverage" explicitly as
+    # a grading criterion; medicare_sanity is only included once there's
+    # enough matched volume (MIN_MEDICARE_ROWS) for the out-of-band rate
+    # to mean anything, otherwise a handful of matches could swing the
+    # score on noise. rate_type is deliberately NOT part of the score --
+    # it describes the file's pricing mechanism, not its quality, so
+    # grading on it would penalize a file for being percentage-priced
+    # rather than for being wrong.
+    MIN_MEDICARE_ROWS = 50
+    parts = [
+        (uniqueness, 2),
+        (outlier_sanity, 2),
+        (code_coverage_weighted_pct, 3),
+        (medicare_sanity if medicare_matched >= MIN_MEDICARE_ROWS else None, 2),
+        (100.0 - expired_rate_pct if total else None, 1),
+        (freshness, 1),
+        (validity, 1),
+    ]
+    weighted_parts = [(value, weight) for value, weight in parts if value is not None]
+    score = (
+        round(sum(value * weight for value, weight in weighted_parts) / sum(weight for _, weight in weighted_parts), 1)
+        if weighted_parts
+        else 0.0
+    )
     return {
         "rate_file_url": rate_file_url,
         "archive_member": member,
@@ -372,7 +711,7 @@ def grade_member(
         "zero_or_negative_rate_pct": round(100 * zero_or_negative / total, 4) if total else 0.0,
         "invalid_rate_pct": round(100 * invalid_rate / total, 4) if total else 0.0,
         "exact_duplicate_rate_pct": round(100 * duplicates / total, 4) if total else 0.0,
-        "negotiated_dollar_rate_pct": round(100 * rate_types["negotiated"] / total, 4) if total else 0.0,
+        "negotiated_dollar_rate_pct": round(100 * dollar_rate_types / total, 4) if total else 0.0,
         "professional_rate_pct": round(100 * billing_classes["professional"] / total, 4) if total else 0.0,
         "cohort_outlier_rate_pct_estimate": None if outlier_pct is None else round(outlier_pct, 4),
         "cohort_outlier_support": outlier_support,
@@ -382,6 +721,25 @@ def grade_member(
         "exception_row_count": exception_rows,
         "row_flags_written": flags_written,
         "row_flags_truncated": exception_rows > flags_written,
+        "item_repetition_rate_pct": item_repetition_rate_pct,
+        "most_repeated_code": most_repeated_code,
+        "most_repeated_code_count": most_repeated_code_count,
+        "avg_providers_per_code": avg_providers_per_code,
+        "inconsistent_description_codes": inconsistent_description_codes,
+        "inconsistent_description_rate_pct": inconsistent_description_rate_pct,
+        "orphan_provider_refs": len(orphan_refs),
+        "ghost_provider_groups": len(ghost_groups),
+        "pointer_integrity_pct": pointer_integrity_pct,
+        "unrecognized_code_count": unrecognized_code_count,
+        "unrecognized_code_rate_pct": unrecognized_code_rate_pct,
+        "code_coverage_weighted_pct": code_coverage_weighted_pct,
+        "expiration_transparency_pct": expiration_transparency_pct,
+        "expired_rate_pct": expired_rate_pct,
+        "code_type_collisions": code_type_collisions,
+        "code_type_collision_rate_pct": code_type_collision_rate_pct,
+        "distinct_outlier_cohorts": len(reservoirs),
+        "outlier_cohort_cap_reached": len(reservoirs) >= max_outlier_cohorts,
+        "outlier_cohort_cap_skipped_prices": outlier_cohort_cap_skipped,
         "quality_score": score,
         "quality_grade": "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 55 else "D" if score >= 40 else "F",
     }
@@ -397,6 +755,9 @@ def _grade_candidate(
     block_size: int,
     flag_limit: int,
     medicare_rates: dict[str, tuple[float, float]] | None,
+    hilabs_weights: dict[str, float] | None,
+    max_outlier_cohorts: int,
+    as_of: date,
 ) -> tuple[int, dict[str, object]]:
     db_path = stage_dir / f".c3_identities_{index}.sqlite"
     flags_path = stage_dir / "row_flags" / f"{index:04d}.parquet"
@@ -413,6 +774,9 @@ def _grade_candidate(
             block_size=block_size,
             flag_limit=flag_limit,
             medicare_rates=medicare_rates,
+            hilabs_weights=hilabs_weights,
+            max_outlier_cohorts=max_outlier_cohorts,
+            as_of=as_of,
         )
     finally:
         db_path.unlink(missing_ok=True)
@@ -427,14 +791,21 @@ def run_c3(cfg: Config) -> StageResult:
     sample_every = _positive_env("PTD_C3_SAMPLE_EVERY", 1)
     block_size = _positive_env("PTD_C3_BLOCK_SIZE", 1000)
     flag_limit = _positive_env("PTD_C3_ROW_FLAG_LIMIT", 100_000)
+    # Bounds outlier-reservoir memory against code diversity, not row
+    # count or file size -- verified these don't correlate on a real
+    # 513MB/6,068-distinct-code file. 50,000 is ~8x headroom over that.
+    max_outlier_cohorts = _positive_env("PTD_C3_MAX_OUTLIER_COHORTS", 50_000)
+    as_of = _as_of(os.environ.get("PTD_AS_OF"))
     candidates = [
         (index, str(candidate["rate_file_url"]), archive_member_for_url(cfg, str(candidate["rate_file_url"])))
         for index, candidate in enumerate(c2_rate_files(cfg))
     ]
     medicare_rates = _load_medicare_lookup(cfg.archive)
+    hilabs_weights = _load_hilabs_weights(cfg.archive)
     workers = min(_positive_env("PTD_C3_WORKERS", 1), max(1, len(candidates)))
     args = [
-        (cfg.archive, stage_dir, index, url, member, sample_every, block_size, flag_limit, medicare_rates)
+        (cfg.archive, stage_dir, index, url, member, sample_every, block_size, flag_limit,
+         medicare_rates, hilabs_weights, max_outlier_cohorts, as_of)
         for index, url, member in candidates
     ]
     if workers == 1:
@@ -455,6 +826,36 @@ def run_c3(cfg: Config) -> StageResult:
     ]
     lines.extend(
         f"| {row['archive_member']} | {row['quality_score']} | {row['quality_grade']} | {row['price_count']} | {row['zero_or_negative_rate_pct']} | {row['exact_duplicate_rate_pct']} | {row['cohort_outlier_rate_pct_estimate']} | {row['medicare_out_of_band_pct']} |"
+        for row in rows
+    )
+    lines.extend(
+        [
+            "",
+            "## Coverage (PS-named: \"code coverage\")",
+            "",
+            "| File | Code coverage % (weighted) |",
+            "|---|---:|",
+        ]
+    )
+    lines.extend(
+        f"| {row['archive_member']} | {row['code_coverage_weighted_pct']} |"
+        for row in rows
+    )
+    lines.extend(
+        [
+            "",
+            "## Structural diagnostics (not folded into the score above)",
+            "",
+            "| File | Item repetition % | Most-repeated code (count) | Avg providers/code | Inconsistent-description codes | Pointer integrity % | Unrecognized-code % | Expiration transparency % | Expired rate % | Code-type collisions |",
+            "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    lines.extend(
+        f"| {row['archive_member']} | {row['item_repetition_rate_pct']} "
+        f"| {row['most_repeated_code']} ({row['most_repeated_code_count']}) "
+        f"| {row['avg_providers_per_code']} | {row['inconsistent_description_codes']} "
+        f"| {row['pointer_integrity_pct']} | {row['unrecognized_code_rate_pct']} "
+        f"| {row['expiration_transparency_pct']} | {row['expired_rate_pct']} | {row['code_type_collisions']} |"
         for row in rows
     )
     report_path.write_text("\n".join(lines) + "\n")

@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from pipeline.config import Config
 from pipeline.io.manifest import write_manifest
-from pipeline.stages.c5_address import _normalize_address, _text
+from pipeline.stages.c5_address import _address_state, _normalize_address, _text
 
 
 @dataclass(frozen=True)
@@ -115,6 +115,11 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
     dup_keys = 0
     ambiguous_count = 0
     for key, grp in groups.items():
+        # Defense in depth: C6 never exports an out-of-market or unknown-state address,
+        # even when supplied an older C5 artifact produced before CA-only filtering.
+        grp = [row for row in grp if _address_state(row.get("Address", "")) == "CA"]
+        if not grp:
+            continue
         sel, status, reason, alts = _select_canonical(grp)
         if status == "AMBIGUOUS_SINGLE_ADDRESS_SELECTED":
             ambiguous_count += 1
@@ -153,6 +158,7 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
                      and _text(r.get("NPI", ""))
                      and _text(r.get("TIN", ""))
                      and _text(r.get("Address", ""))
+                     and _address_state(r.get("Address", "")) == "CA"
                      and _text(r.get("Specialty", ""))
                      and _text(r.get("Rate", ""))]
 
@@ -175,20 +181,54 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
     ws = wb.active
     ws.title = "Curated Rates"
     headers = ["NPI", "TIN", "Address", "Billing Code", "Specialty", "Rate",
-               "Address_Status", "Address_Source", "Taxonomy_Code", "Specialty_Source",
+               "Address_Status", "Address_Source", "Address_Confidence",
+               "Address_Source_Count", "Address_Score", "Address_Verification_Status",
+               "Address_Evidence_Tier", "Taxonomy_Code", "Specialty_Source",
                "Negotiated_Type", "Billing_Class", "Address_Candidate_Count",
-               "Address_Selection_Status", "Address_Selection_Reason"]
+               "Address_Selection_Status", "Address_Selection_Reason", "Specialty_Status",
+               "Geocode_Status", "Latitude", "Longitude", "Nearest_TIN_Site_Distance_Km",
+               "Geo_Score", "Geo_Anomaly_Flag", "TIN_Modal_ZIP3", "TIN_Support_Score",
+               "TIN_Address_Link_Status", "Reassignment_Status", "Group_PAC_ID",
+               "Reassignment_Group_Name", "Reassignment_Name_Match",
+               "HN_Hidden_Reason", "PECOS_Enrollment"]
     ws.append(headers)
     for r in selected_rows:
+        rate = r.get("Rate", "")
+        try:
+            rate = float(rate)
+        except (TypeError, ValueError):
+            pass
+        address_source_count = r.get("Address_Source_Count", "")
+        address_score = r.get("Address_Score", "")
+        try:
+            address_source_count = int(address_source_count)
+        except (TypeError, ValueError):
+            pass
+        try:
+            address_score = float(address_score)
+            if address_score.is_integer():
+                address_score = int(address_score)
+        except (TypeError, ValueError):
+            pass
         ws.append([
             r.get("NPI", ""), r.get("TIN", ""), r.get("Address", ""),
-            r.get("Billing_Code", ""), r.get("Specialty", ""), r.get("Rate", ""),
+            r.get("Billing_Code", ""), r.get("Specialty", ""), rate,
             r.get("Address_Status", ""), r.get("Address_Source", ""),
+            r.get("Address_Confidence", ""), address_source_count, address_score,
+            r.get("Address_Verification_Status", ""), r.get("Address_Evidence_Tier", ""),
             r.get("Taxonomy_Code", ""), r.get("Specialty_Source", ""),
             r.get("Negotiated_Type", ""), r.get("Billing_Class", ""),
             r.get("Address_Candidate_Count", ""),
             r.get("Address_Selection_Status", ""),
             r.get("Address_Selection_Reason", ""),
+            r.get("Specialty_Status", ""), r.get("Geocode_Status", ""),
+            r.get("Latitude", ""), r.get("Longitude", ""),
+            r.get("Nearest_TIN_Site_Distance_Km", ""), r.get("Geo_Score", ""),
+            r.get("Geo_Anomaly_Flag", ""), r.get("TIN_Modal_ZIP3", ""),
+            r.get("TIN_Support_Score", ""), r.get("TIN_Address_Link_Status", ""),
+            r.get("Reassignment_Status", ""), r.get("Group_PAC_ID", ""),
+            r.get("Reassignment_Group_Name", ""), r.get("Reassignment_Name_Match", ""),
+            r.get("HN_Hidden_Reason", ""), r.get("PECOS_Enrollment", ""),
         ])
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{ws.max_row}"
