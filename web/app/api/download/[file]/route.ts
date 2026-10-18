@@ -2,16 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
+import { resolveDataPath } from "@/lib/api/data";
+
 export const runtime = "nodejs";
 
-const DATA_DIR = process.env.PTD_DATA_DIR || path.join(process.cwd(), "..");
-
 const ALLOWED_FILES: Record<string, string> = {
-  "final_provider_rates.xlsx": "data/out/final_provider_rates.xlsx",
-  "c7_cost_effectiveness.xlsx": "data/out/c7_cost_effectiveness.xlsx",
-  "c2_ppo_network.xlsx": "data/out/c2_ppo_network.xlsx",
-  "c5result.csv": "data/stage/c5/c5result.csv",
-  "c7_code_detail.csv": "data/stage/c7/c7_code_detail.csv",
+  "final_provider_rates.xlsx": "out/final_provider_rates.xlsx",
+  "final_provider_rates.csv": "out/final_provider_rates.csv",
+  "c7_cost_effectiveness.xlsx": "out/c7_cost_effectiveness.xlsx",
+  "c2_ppo_network.xlsx": "out/c2_ppo_network.xlsx",
+  "c5result.csv": "stage/c5/c5result.csv",
+  "c7_code_detail.csv": "stage/c7/c7_code_detail.csv",
 };
 
 export async function GET(
@@ -25,7 +26,7 @@ export async function GET(
     return new NextResponse("File not found or not permitted for download", { status: 404 });
   }
 
-  const fullPath = path.isAbsolute(relPath) ? relPath : path.join(DATA_DIR, relPath);
+  const fullPath = resolveDataPath(relPath);
 
   if (!fs.existsSync(fullPath)) {
     return new NextResponse("Requested deliverable file does not exist yet", { status: 404 });

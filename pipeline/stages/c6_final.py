@@ -260,6 +260,12 @@ def run_c6(cfg: Config, c5_path: Path | None = None, output_path: Path | None = 
         c.font = Font(bold=True)
 
     wb.save(out_path)
+    out_csv_path = out_path.with_suffix(".csv")
+    with open(out_csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        for r in selected_rows:
+            writer.writerow([r.get(h, "") for h in headers])
 
     manifest_path = cfg.stage_dir("c6") / "_manifest.json"
     cfg.stage_dir("c6").mkdir(parents=True, exist_ok=True)
