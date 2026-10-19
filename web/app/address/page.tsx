@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import type { AddressStatusData, UnresolvedRecord } from "@/lib/types";
+import { C5C6EvidenceCard } from "@/components/dashboard/C5C6EvidenceCard";
 
 const statusConfig = {
   corroborated: {
@@ -323,6 +324,9 @@ export default function AddressPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* C5 Heuristic Scoring Matrix & C6 Multi-Source Verification Breakdown */}
+        <C5C6EvidenceCard />
 
         {/* Unresolved List */}
         <Card>

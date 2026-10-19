@@ -103,48 +103,66 @@ const features = tableFeatures({
 const columnHelper = createColumnHelper<typeof features, RateRecord>();
 
 const columns = [
+  // 1. NPI
   columnHelper.accessor("npi", {
+    id: "NPI",
     header: "NPI",
-    cell: (info) => <span className="font-mono text-sm">{info.getValue()}</span>,
+    cell: (info) => <span className="font-mono text-sm font-medium">{String(info.getValue())}</span>,
     filterFn: "includesString",
   }),
+  // 2. TIN
   columnHelper.accessor("tin", {
+    id: "TIN",
     header: "TIN",
-    cell: (info) => <span className="font-mono text-sm">{info.getValue()}</span>,
+    cell: (info) => <span className="font-mono text-sm">{String(info.getValue())}</span>,
     filterFn: "includesString",
   }),
+  // 3. Address
   columnHelper.accessor("address", {
+    id: "Address",
     header: "Address",
     cell: (info) => (
-      <span className="text-sm max-w-[200px] truncate block" title={info.getValue()}>
-        {info.getValue()}
+      <span className="text-sm max-w-[220px] truncate block" title={String(info.getValue())}>
+        {String(info.getValue())}
       </span>
     ),
   }),
+  // 4. Billing Code
   columnHelper.accessor("billing_code", {
+    id: "Billing Code",
     header: "Billing Code",
     cell: (info) => (
-      <Badge variant="outline" className="text-xs">
-        {info.getValue()}
+      <Badge variant="outline" className="text-xs font-mono">
+        {String(info.getValue())}
       </Badge>
     ),
     filterFn: "includesString",
   }),
+  // 5. Specialty
   columnHelper.accessor("specialty", {
+    id: "Specialty",
     header: "Specialty",
-    cell: (info) => <span className="text-sm">{info.getValue()}</span>,
+    cell: (info) => (
+      <span className="text-sm max-w-[200px] truncate block" title={String(info.getValue())}>
+        {String(info.getValue())}
+      </span>
+    ),
     filterFn: "includesString",
   }),
+  // 6. Rate
   columnHelper.accessor("rate", {
+    id: "Rate",
     header: "Rate",
     cell: (info) => (
-      <span className="font-mono tabular-nums text-sm">${info.getValue()}</span>
+      <span className="font-mono tabular-nums text-sm font-semibold">${Number(info.getValue()).toFixed(2)}</span>
     ),
   }),
-  columnHelper.accessor("address_status", {
-    header: "Address Status",
+  // 7. Address_Status
+  columnHelper.accessor((row) => row.Address_Status || row.address_status, {
+    id: "Address_Status",
+    header: "Address_Status",
     cell: (info) => {
-      const status = info.getValue();
+      const status = String(info.getValue() || "").toLowerCase();
       const variants: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
         corroborated: "default",
         single_source: "secondary",
@@ -152,21 +170,215 @@ const columns = [
         unresolved: "outline",
       };
       return (
-        <Badge variant={variants[status] || "outline"} className="text-xs capitalize">
-          {status.replace("_", " ")}
+        <Badge variant={variants[status] || "outline"} className="text-xs">
+          {String(info.getValue() || "")}
         </Badge>
       );
     },
     filterFn: "includesString",
   }),
-  columnHelper.accessor("specialty_source", {
-    header: "Specialty Source",
+  // 8. Address_Source
+  columnHelper.accessor((row) => row.Address_Source || row.address_source, {
+    id: "Address_Source",
+    header: "Address_Source",
+    cell: (info) => (
+      <span className="text-xs font-mono text-muted-foreground max-w-[160px] truncate block" title={String(info.getValue() || "")}>
+        {String(info.getValue() || "")}
+      </span>
+    ),
+  }),
+  // 9. Address_Confidence
+  columnHelper.accessor((row) => row.Address_Confidence || row.address_confidence, {
+    id: "Address_Confidence",
+    header: "Address_Confidence",
+    cell: (info) => (
+      <Badge variant="outline" className="text-xs font-mono">
+        {String(info.getValue() || "")}
+      </Badge>
+    ),
+  }),
+  // 10. Address_Source_Count
+  columnHelper.accessor((row) => row.Address_Source_Count ?? row.address_source_count, {
+    id: "Address_Source_Count",
+    header: "Address_Source_Count",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() ?? "")}</span>,
+  }),
+  // 11. Address_Score
+  columnHelper.accessor((row) => row.Address_Score ?? row.address_score, {
+    id: "Address_Score",
+    header: "Address_Score",
+    cell: (info) => <span className="font-mono text-xs font-semibold">{String(info.getValue() ?? "")}</span>,
+  }),
+  // 12. Address_Verification_Status
+  columnHelper.accessor((row) => row.Address_Verification_Status || row.address_verification_status, {
+    id: "Address_Verification_Status",
+    header: "Address_Verification_Status",
+    cell: (info) => (
+      <Badge variant="secondary" className="text-xs font-mono">
+        {String(info.getValue() || "")}
+      </Badge>
+    ),
+  }),
+  // 13. Address_Evidence_Tier
+  columnHelper.accessor((row) => row.Address_Evidence_Tier || row.address_evidence_tier, {
+    id: "Address_Evidence_Tier",
+    header: "Address_Evidence_Tier",
+    cell: (info) => <span className="text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 14. Taxonomy_Code
+  columnHelper.accessor((row) => row.Taxonomy_Code || row.taxonomy_code, {
+    id: "Taxonomy_Code",
+    header: "Taxonomy_Code",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 15. Specialty_Source
+  columnHelper.accessor((row) => row.Specialty_Source || row.specialty_source, {
+    id: "Specialty_Source",
+    header: "Specialty_Source",
     cell: (info) => (
       <Badge variant="outline" className="text-xs">
-        {info.getValue()}
+        {String(info.getValue() || "")}
       </Badge>
     ),
     filterFn: "includesString",
+  }),
+  // 16. Negotiated_Type
+  columnHelper.accessor((row) => row.Negotiated_Type || row.negotiated_type, {
+    id: "Negotiated_Type",
+    header: "Negotiated_Type",
+    cell: (info) => <span className="text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 17. Billing_Class
+  columnHelper.accessor((row) => row.Billing_Class || row.billing_class, {
+    id: "Billing_Class",
+    header: "Billing_Class",
+    cell: (info) => <span className="text-xs capitalize">{String(info.getValue() || "")}</span>,
+  }),
+  // 18. Address_Candidate_Count
+  columnHelper.accessor((row) => row.Address_Candidate_Count ?? row.address_candidate_count, {
+    id: "Address_Candidate_Count",
+    header: "Address_Candidate_Count",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() ?? "")}</span>,
+  }),
+  // 19. Address_Selection_Status
+  columnHelper.accessor((row) => row.Address_Selection_Status || row.address_selection_status, {
+    id: "Address_Selection_Status",
+    header: "Address_Selection_Status",
+    cell: (info) => <span className="text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 20. Address_Selection_Reason
+  columnHelper.accessor((row) => row.Address_Selection_Reason || row.address_selection_reason, {
+    id: "Address_Selection_Reason",
+    header: "Address_Selection_Reason",
+    cell: (info) => (
+      <span className="text-xs text-muted-foreground max-w-[200px] truncate block" title={String(info.getValue() || "")}>
+        {String(info.getValue() || "")}
+      </span>
+    ),
+  }),
+  // 21. Specialty_Status
+  columnHelper.accessor((row) => row.Specialty_Status || row.specialty_status, {
+    id: "Specialty_Status",
+    header: "Specialty_Status",
+    cell: (info) => <span className="text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 22. Geocode_Status
+  columnHelper.accessor((row) => row.Geocode_Status || row.geocode_status, {
+    id: "Geocode_Status",
+    header: "Geocode_Status",
+    cell: (info) => <span className="text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 23. Latitude
+  columnHelper.accessor((row) => row.Latitude ?? row.latitude, {
+    id: "Latitude",
+    header: "Latitude",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() ?? "")}</span>,
+  }),
+  // 24. Longitude
+  columnHelper.accessor((row) => row.Longitude ?? row.longitude, {
+    id: "Longitude",
+    header: "Longitude",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() ?? "")}</span>,
+  }),
+  // 25. Nearest_TIN_Site_Distance_Km
+  columnHelper.accessor((row) => row.Nearest_TIN_Site_Distance_Km ?? row.nearest_tin_site_distance_km, {
+    id: "Nearest_TIN_Site_Distance_Km",
+    header: "Nearest_TIN_Site_Distance_Km",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() ?? "")}</span>,
+  }),
+  // 26. Geo_Score
+  columnHelper.accessor((row) => row.Geo_Score ?? row.geo_score, {
+    id: "Geo_Score",
+    header: "Geo_Score",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() ?? "")}</span>,
+  }),
+  // 27. Geo_Anomaly_Flag
+  columnHelper.accessor((row) => row.Geo_Anomaly_Flag || row.geo_anomaly_flag, {
+    id: "Geo_Anomaly_Flag",
+    header: "Geo_Anomaly_Flag",
+    cell: (info) => <span className="text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 28. TIN_Modal_ZIP3
+  columnHelper.accessor((row) => row.TIN_Modal_ZIP3 || row.tin_modal_zip3, {
+    id: "TIN_Modal_ZIP3",
+    header: "TIN_Modal_ZIP3",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 29. TIN_Support_Score
+  columnHelper.accessor((row) => row.TIN_Support_Score ?? row.tin_support_score, {
+    id: "TIN_Support_Score",
+    header: "TIN_Support_Score",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() ?? "")}</span>,
+  }),
+  // 30. TIN_Address_Link_Status
+  columnHelper.accessor((row) => row.TIN_Address_Link_Status || row.tin_address_link_status, {
+    id: "TIN_Address_Link_Status",
+    header: "TIN_Address_Link_Status",
+    cell: (info) => <span className="text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 31. Reassignment_Status
+  columnHelper.accessor((row) => row.Reassignment_Status || row.reassignment_status, {
+    id: "Reassignment_Status",
+    header: "Reassignment_Status",
+    cell: (info) => <span className="text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 32. Group_PAC_ID
+  columnHelper.accessor((row) => row.Group_PAC_ID || row.group_pac_id, {
+    id: "Group_PAC_ID",
+    header: "Group_PAC_ID",
+    cell: (info) => <span className="font-mono text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 33. Reassignment_Group_Name
+  columnHelper.accessor((row) => row.Reassignment_Group_Name || row.reassignment_group_name, {
+    id: "Reassignment_Group_Name",
+    header: "Reassignment_Group_Name",
+    cell: (info) => (
+      <span className="text-xs max-w-[180px] truncate block" title={String(info.getValue() || "")}>
+        {String(info.getValue() || "")}
+      </span>
+    ),
+  }),
+  // 34. Reassignment_Name_Match
+  columnHelper.accessor((row) => row.Reassignment_Name_Match || row.reassignment_name_match, {
+    id: "Reassignment_Name_Match",
+    header: "Reassignment_Name_Match",
+    cell: (info) => <span className="text-xs">{String(info.getValue() || "")}</span>,
+  }),
+  // 35. HN_Hidden_Reason
+  columnHelper.accessor((row) => row.HN_Hidden_Reason || row.hn_hidden_reason, {
+    id: "HN_Hidden_Reason",
+    header: "HN_Hidden_Reason",
+    cell: (info) => <span className="text-xs text-muted-foreground">{String(info.getValue() || "")}</span>,
+  }),
+  // 36. PECOS_Enrollment
+  columnHelper.accessor((row) => row.PECOS_Enrollment || row.pecos_enrollment, {
+    id: "PECOS_Enrollment",
+    header: "PECOS_Enrollment",
+    cell: (info) => (
+      <Badge variant="outline" className="text-xs font-mono">
+        {String(info.getValue() || "")}
+      </Badge>
+    ),
   }),
 ];
 
@@ -285,26 +497,55 @@ export default function RatesPage() {
   const handleExportCSV = () => {
     if (data.length === 0) return;
     const headers = [
-      "NPI",
-      "TIN",
-      "Address",
-      "Billing Code",
-      "Specialty",
-      "Rate",
-      "Address Status",
-      "Specialty Source",
-      "Selection Rule",
+      "NPI", "TIN", "Address", "Billing Code", "Specialty", "Rate",
+      "Address_Status", "Address_Source", "Address_Confidence",
+      "Address_Source_Count", "Address_Score", "Address_Verification_Status",
+      "Address_Evidence_Tier", "Taxonomy_Code", "Specialty_Source",
+      "Negotiated_Type", "Billing_Class", "Address_Candidate_Count",
+      "Address_Selection_Status", "Address_Selection_Reason", "Specialty_Status",
+      "Geocode_Status", "Latitude", "Longitude", "Nearest_TIN_Site_Distance_Km",
+      "Geo_Score", "Geo_Anomaly_Flag", "TIN_Modal_ZIP3", "TIN_Support_Score",
+      "TIN_Address_Link_Status", "Reassignment_Status", "Group_PAC_ID",
+      "Reassignment_Group_Name", "Reassignment_Name_Match",
+      "HN_Hidden_Reason", "PECOS_Enrollment"
     ];
     const rows = data.map((r) => [
-      `"${r.npi}"`,
-      `"${r.tin}"`,
-      `"${(r.address || "").replace(/"/g, '""')}"`,
-      `"${r.billing_code}"`,
-      `"${(r.specialty || "").replace(/"/g, '""')}"`,
-      r.rate,
-      `"${r.address_status}"`,
-      `"${r.specialty_source || ""}"`,
-      `"${r.selection_rule || ""}"`,
+      `"${r.npi || r.NPI || ""}"`,
+      `"${r.tin || r.TIN || ""}"`,
+      `"${(r.address || r.Address || "").replace(/"/g, '""')}"`,
+      `"${r.billing_code || r["Billing Code"] || ""}"`,
+      `"${(r.specialty || r.Specialty || "").replace(/"/g, '""')}"`,
+      r.rate ?? r.Rate ?? 0,
+      `"${r.Address_Status || r.address_status || ""}"`,
+      `"${r.Address_Source || r.address_source || ""}"`,
+      `"${r.Address_Confidence || r.address_confidence || ""}"`,
+      r.Address_Source_Count ?? r.address_source_count ?? 0,
+      r.Address_Score ?? r.address_score ?? 0,
+      `"${r.Address_Verification_Status || r.address_verification_status || ""}"`,
+      `"${r.Address_Evidence_Tier || r.address_evidence_tier || ""}"`,
+      `"${r.Taxonomy_Code || r.taxonomy_code || ""}"`,
+      `"${r.Specialty_Source || r.specialty_source || ""}"`,
+      `"${r.Negotiated_Type || r.negotiated_type || ""}"`,
+      `"${r.Billing_Class || r.billing_class || ""}"`,
+      r.Address_Candidate_Count ?? r.address_candidate_count ?? 0,
+      `"${r.Address_Selection_Status || r.address_selection_status || ""}"`,
+      `"${(r.Address_Selection_Reason || r.address_selection_reason || "").replace(/"/g, '""')}"`,
+      `"${r.Specialty_Status || r.specialty_status || ""}"`,
+      `"${r.Geocode_Status || r.geocode_status || ""}"`,
+      `"${r.Latitude ?? r.latitude ?? ""}"`,
+      `"${r.Longitude ?? r.longitude ?? ""}"`,
+      `"${r.Nearest_TIN_Site_Distance_Km ?? r.nearest_tin_site_distance_km ?? ""}"`,
+      `"${r.Geo_Score ?? r.geo_score ?? ""}"`,
+      `"${r.Geo_Anomaly_Flag || r.geo_anomaly_flag || ""}"`,
+      `"${r.TIN_Modal_ZIP3 || r.tin_modal_zip3 || ""}"`,
+      `"${r.TIN_Support_Score ?? r.tin_support_score ?? ""}"`,
+      `"${r.TIN_Address_Link_Status || r.tin_address_link_status || ""}"`,
+      `"${r.Reassignment_Status || r.reassignment_status || ""}"`,
+      `"${r.Group_PAC_ID || r.group_pac_id || ""}"`,
+      `"${(r.Reassignment_Group_Name || r.reassignment_group_name || "").replace(/"/g, '""')}"`,
+      `"${r.Reassignment_Name_Match || r.reassignment_name_match || ""}"`,
+      `"${r.HN_Hidden_Reason || r.hn_hidden_reason || ""}"`,
+      `"${r.PECOS_Enrollment || r.pecos_enrollment || ""}"`,
     ]);
     const csvContent =
       "data:text/csv;charset=utf-8," +
@@ -323,6 +564,8 @@ export default function RatesPage() {
 
   const hasActiveFilters =
     globalFilter || columnFilters.some((f) => f.value !== undefined && f.value !== "");
+
+  const visibleColumnCount = Object.values(columnVisibility).filter((v) => v !== false).length;
 
   return (
     <DashboardLayout
@@ -357,40 +600,70 @@ export default function RatesPage() {
               <details className="relative">
                 <summary className="inline-flex h-9 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground cursor-pointer list-none select-none">
                   <Columns className="h-4 w-4" />
-                  <span>Columns</span>
+                  <span>Columns ({visibleColumnCount}/{columns.length})</span>
                 </summary>
-                <div className="absolute z-50 mt-2 w-80 rounded-md border border-border bg-card p-2 shadow-md">
-                  <div className="px-2 py-1.5 text-sm font-semibold">Display Columns</div>
-                  <div className="my-1 h-px bg-border" />
-                  {columns.map((col) => {
-                    if (!("accessorFn" in col) || !col.id) return null;
-                    const colId = col.id;
-                    return (
-                      <label key={colId} className="flex items-center gap-2 px-2 py-1.5 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={columnVisibility[colId]}
-                          onChange={() =>
-                            setColumnVisibility((prev) => ({
-                              ...prev,
-                              [colId]: !prev[colId],
-                            }))
-                          }
-                          className="h-4 w-4 rounded border-border"
-                        />
-                        <span className="text-sm flex-1 capitalize">{colId.replace("_", " ")}</span>
-                      </label>
-                    );
-                  })}
-                  <div className="my-1 h-px bg-border" />
-                  <button
-                    onClick={clearFilters}
-                    disabled={!hasActiveFilters}
-                    className="flex w-full items-center gap-2 px-2 py-1.5 text-sm text-red-600 disabled:opacity-50 cursor-pointer"
-                  >
-                    <X className="h-4 w-4" />
-                    Reset All Filters
-                  </button>
+                <div className="absolute z-50 mt-2 w-80 max-h-96 overflow-y-auto rounded-md border border-border bg-card p-3 shadow-lg">
+                  <div className="flex items-center justify-between pb-2 mb-1 border-b border-border">
+                    <span className="text-sm font-semibold">Display Columns ({columns.length})</span>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const all: Record<string, boolean> = {};
+                          columns.forEach((c) => { if (c.id) all[c.id] = true; });
+                          setColumnVisibility(all);
+                        }}
+                        className="text-primary hover:underline font-medium cursor-pointer"
+                      >
+                        All
+                      </button>
+                      <span>·</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const core: Record<string, boolean> = {};
+                          columns.forEach((c, idx) => { if (c.id) core[c.id] = idx < 6; });
+                          setColumnVisibility(core);
+                        }}
+                        className="text-muted-foreground hover:underline font-medium cursor-pointer"
+                      >
+                        Core 6
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-0.5">
+                    {columns.map((col) => {
+                      const colId = col.id;
+                      if (!colId) return null;
+                      const isChecked = columnVisibility[colId] !== false;
+                      return (
+                        <label key={colId} className="flex items-center gap-2 px-2 py-1 hover:bg-accent/40 rounded cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() =>
+                              setColumnVisibility((prev) => ({
+                                ...prev,
+                                [colId]: !isChecked,
+                              }))
+                            }
+                            className="h-4 w-4 rounded border-border"
+                          />
+                          <span className="text-xs font-mono flex-1 truncate">{colId}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-border">
+                    <button
+                      onClick={clearFilters}
+                      disabled={!hasActiveFilters}
+                      className="flex w-full items-center justify-center gap-2 py-1 text-xs text-red-600 disabled:opacity-40 cursor-pointer"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Reset All Filters
+                    </button>
+                  </div>
                 </div>
               </details>
 

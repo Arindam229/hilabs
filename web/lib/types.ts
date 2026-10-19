@@ -207,6 +207,38 @@ export interface RateRecord {
   selection_rule?: string;
   candidate_count?: number;
   alternatives?: RateRecord[];
+
+  // All 36 Excel columns from final_provider_rates.xlsx
+  address_source?: string;
+  address_confidence?: string;
+  address_source_count?: number;
+  address_score?: number;
+  address_verification_status?: string;
+  address_evidence_tier?: string;
+  taxonomy_code?: string;
+  negotiated_type?: string;
+  billing_class?: string;
+  address_candidate_count?: number;
+  address_selection_status?: string;
+  address_selection_reason?: string;
+  specialty_status?: string;
+  geocode_status?: string;
+  latitude?: string | number;
+  longitude?: string | number;
+  nearest_tin_site_distance_km?: string | number;
+  geo_score?: string | number;
+  geo_anomaly_flag?: string;
+  tin_modal_zip3?: string;
+  tin_support_score?: string | number;
+  tin_address_link_status?: string;
+  reassignment_status?: string;
+  group_pac_id?: string;
+  reassignment_group_name?: string;
+  reassignment_name_match?: string;
+  hn_hidden_reason?: string;
+  pecos_enrollment?: string;
+
+  [key: string]: any;
 }
 
 export interface AuditEntry {

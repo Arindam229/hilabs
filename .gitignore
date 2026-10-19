@@ -232,6 +232,7 @@ GEMINI.md
 # PTD pipeline runtime data (large public files, never commit)
 /data/*
 !/data/.gitkeep
+!/data/out/
 
 # OS and environment
 .DS_Store

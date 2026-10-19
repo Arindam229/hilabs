@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import * as XLSX from "xlsx";
 import {
   C4Summary,
   C5Summary,
@@ -300,40 +301,37 @@ let cachedRateRecords: RateRecord[] | null = null;
 let cachedFileMtime = 0;
 
 function loadAllDeliverableRates(): RateRecord[] {
-  const c6CsvPath = resolveDataPath("out/final_provider_rates.csv");
-  if (!fs.existsSync(c6CsvPath)) {
+  const c6XlsxPath = resolveDataPath("out/final_provider_rates.xlsx");
+  if (!fs.existsSync(c6XlsxPath)) {
     return [];
   }
 
   try {
-    const stats = fs.statSync(c6CsvPath);
+    const stats = fs.statSync(c6XlsxPath);
     if (cachedRateRecords && stats.mtimeMs === cachedFileMtime) {
       return cachedRateRecords;
     }
 
-    const content = fs.readFileSync(c6CsvPath, "utf-8");
-    const lines = content.split("\n");
-    if (lines.length <= 1) return [];
+    const fileBuffer = fs.readFileSync(c6XlsxPath);
+    const wb = XLSX.read(fileBuffer, { type: "buffer" });
+    const sheetName = wb.SheetNames[0] || "Curated Rates";
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) return [];
 
-    const records: RateRecord[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      const cols = parseCSVLine(line);
-      if (cols.length < 6) continue;
+    const rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet);
+    const records: RateRecord[] = rawRows.map((row) => {
+      const npi = String(row["NPI"] ?? "").trim();
+      const tin = String(row["TIN"] ?? "").trim();
+      const address = String(row["Address"] ?? "").trim();
+      const billing_code = String(row["Billing Code"] ?? "").trim();
+      const specialty = String(row["Specialty"] ?? "").trim();
+      const rateVal = row["Rate"];
+      const rate = typeof rateVal === "number" ? rateVal : parseFloat(rateVal) || 0;
+      const rawStatus = String(row["Address_Status"] ?? "unresolved");
+      const address_status = rawStatus.toLowerCase();
 
-      const npi = cols[0] || "";
-      const tin = cols[1] || "";
-      const address = cols[2] || "";
-      const billing_code = cols[3] || "";
-      const specialty = cols[4] || "";
-      const rate = parseFloat(cols[5]) || 0;
-      const address_status = (cols[6] || "unresolved").toLowerCase();
-      const specialty_source = cols[14] || "NPPES_NUCC";
-      const selection_rule = cols[19] || "only one distinct address";
-      const candidate_count = parseInt(cols[17], 10) || 1;
-
-      records.push({
+      return {
+        // Core standard accessors
         npi,
         tin,
         address,
@@ -341,17 +339,85 @@ function loadAllDeliverableRates(): RateRecord[] {
         specialty,
         rate,
         address_status,
-        specialty_source,
-        selection_rule,
-        candidate_count,
-      });
-    }
+
+        // All 36 columns with exact Excel property names
+        NPI: npi,
+        TIN: tin,
+        Address: address,
+        "Billing Code": billing_code,
+        Specialty: specialty,
+        Rate: rate,
+        Address_Status: rawStatus,
+        Address_Source: String(row["Address_Source"] ?? ""),
+        Address_Confidence: String(row["Address_Confidence"] ?? ""),
+        Address_Source_Count: Number(row["Address_Source_Count"] ?? 0),
+        Address_Score: Number(row["Address_Score"] ?? 0),
+        Address_Verification_Status: String(row["Address_Verification_Status"] ?? ""),
+        Address_Evidence_Tier: String(row["Address_Evidence_Tier"] ?? ""),
+        Taxonomy_Code: String(row["Taxonomy_Code"] ?? ""),
+        Specialty_Source: String(row["Specialty_Source"] ?? "NPPES_NUCC"),
+        Negotiated_Type: String(row["Negotiated_Type"] ?? ""),
+        Billing_Class: String(row["Billing_Class"] ?? ""),
+        Address_Candidate_Count: Number(row["Address_Candidate_Count"] ?? 1),
+        Address_Selection_Status: String(row["Address_Selection_Status"] ?? ""),
+        Address_Selection_Reason: String(row["Address_Selection_Reason"] ?? "only one distinct address"),
+        Specialty_Status: String(row["Specialty_Status"] ?? ""),
+        Geocode_Status: String(row["Geocode_Status"] ?? ""),
+        Latitude: row["Latitude"] !== undefined ? String(row["Latitude"]) : "",
+        Longitude: row["Longitude"] !== undefined ? String(row["Longitude"]) : "",
+        Nearest_TIN_Site_Distance_Km: row["Nearest_TIN_Site_Distance_Km"] !== undefined ? String(row["Nearest_TIN_Site_Distance_Km"]) : "",
+        Geo_Score: row["Geo_Score"] !== undefined ? String(row["Geo_Score"]) : "",
+        Geo_Anomaly_Flag: String(row["Geo_Anomaly_Flag"] ?? ""),
+        TIN_Modal_ZIP3: String(row["TIN_Modal_ZIP3"] ?? ""),
+        TIN_Support_Score: row["TIN_Support_Score"] !== undefined ? String(row["TIN_Support_Score"]) : "",
+        TIN_Address_Link_Status: String(row["TIN_Address_Link_Status"] ?? ""),
+        Reassignment_Status: String(row["Reassignment_Status"] ?? ""),
+        Group_PAC_ID: String(row["Group_PAC_ID"] ?? ""),
+        Reassignment_Group_Name: String(row["Reassignment_Group_Name"] ?? ""),
+        Reassignment_Name_Match: String(row["Reassignment_Name_Match"] ?? ""),
+        HN_Hidden_Reason: String(row["HN_Hidden_Reason"] ?? ""),
+        PECOS_Enrollment: String(row["PECOS_Enrollment"] ?? ""),
+
+        // Lowercase alias helpers
+        address_source: String(row["Address_Source"] ?? ""),
+        address_confidence: String(row["Address_Confidence"] ?? ""),
+        address_source_count: Number(row["Address_Source_Count"] ?? 0),
+        address_score: Number(row["Address_Score"] ?? 0),
+        address_verification_status: String(row["Address_Verification_Status"] ?? ""),
+        address_evidence_tier: String(row["Address_Evidence_Tier"] ?? ""),
+        taxonomy_code: String(row["Taxonomy_Code"] ?? ""),
+        specialty_source: String(row["Specialty_Source"] ?? "NPPES_NUCC"),
+        negotiated_type: String(row["Negotiated_Type"] ?? ""),
+        billing_class: String(row["Billing_Class"] ?? ""),
+        address_candidate_count: Number(row["Address_Candidate_Count"] ?? 1),
+        address_selection_status: String(row["Address_Selection_Status"] ?? ""),
+        address_selection_reason: String(row["Address_Selection_Reason"] ?? "only one distinct address"),
+        specialty_status: String(row["Specialty_Status"] ?? ""),
+        geocode_status: String(row["Geocode_Status"] ?? ""),
+        latitude: row["Latitude"] !== undefined ? String(row["Latitude"]) : "",
+        longitude: row["Longitude"] !== undefined ? String(row["Longitude"]) : "",
+        nearest_tin_site_distance_km: row["Nearest_TIN_Site_Distance_Km"] !== undefined ? String(row["Nearest_TIN_Site_Distance_Km"]) : "",
+        geo_score: row["Geo_Score"] !== undefined ? String(row["Geo_Score"]) : "",
+        geo_anomaly_flag: String(row["Geo_Anomaly_Flag"] ?? ""),
+        tin_modal_zip3: String(row["TIN_Modal_ZIP3"] ?? ""),
+        tin_support_score: row["TIN_Support_Score"] !== undefined ? String(row["TIN_Support_Score"]) : "",
+        tin_address_link_status: String(row["TIN_Address_Link_Status"] ?? ""),
+        reassignment_status: String(row["Reassignment_Status"] ?? ""),
+        group_pac_id: String(row["Group_PAC_ID"] ?? ""),
+        reassignment_group_name: String(row["Reassignment_Group_Name"] ?? ""),
+        reassignment_name_match: String(row["Reassignment_Name_Match"] ?? ""),
+        hn_hidden_reason: String(row["HN_Hidden_Reason"] ?? ""),
+        pecos_enrollment: String(row["PECOS_Enrollment"] ?? ""),
+        selection_rule: String(row["Address_Selection_Reason"] ?? "only one distinct address"),
+        candidate_count: Number(row["Address_Candidate_Count"] ?? 1),
+      };
+    });
 
     cachedRateRecords = records;
     cachedFileMtime = stats.mtimeMs;
     return records;
   } catch (err) {
-    console.error("Error reading deliverable rates from final_provider_rates.csv:", err);
+    console.error("Error reading deliverable rates from final_provider_rates.xlsx:", err);
     return [];
   }
 }
@@ -360,9 +426,9 @@ let cachedFilterOptions: RateFilterOptions | null = null;
 let cachedFilterMtime = 0;
 
 export async function getRateFilterOptions(): Promise<RateFilterOptions> {
-  const c6CsvPath = resolveDataPath("out/final_provider_rates.csv");
-  if (fs.existsSync(c6CsvPath)) {
-    const stats = fs.statSync(c6CsvPath);
+  const c6XlsxPath = resolveDataPath("out/final_provider_rates.xlsx");
+  if (fs.existsSync(c6XlsxPath)) {
+    const stats = fs.statSync(c6XlsxPath);
     if (cachedFilterOptions && stats.mtimeMs === cachedFilterMtime) {
       return cachedFilterOptions;
     }
@@ -399,8 +465,8 @@ export async function getRateFilterOptions(): Promise<RateFilterOptions> {
   }));
 
   cachedFilterOptions = { billingCodes, specialties, addressStatuses };
-  if (fs.existsSync(c6CsvPath)) {
-    cachedFilterMtime = fs.statSync(c6CsvPath).mtimeMs;
+  if (fs.existsSync(c6XlsxPath)) {
+    cachedFilterMtime = fs.statSync(c6XlsxPath).mtimeMs;
   }
   return cachedFilterOptions;
 }

@@ -41,6 +41,7 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { C5C6EvidenceCard } from "@/components/dashboard/C5C6EvidenceCard";
 
 interface NLPData {
   histogram: Array<{ bin: string; count: number }>;
@@ -979,7 +980,7 @@ export default function OverviewPage() {
                   <a href="/api/download/final_provider_rates.xlsx" download>
                     <Button size="sm" variant="outline" className="w-full gap-2 text-xs border-cyan-500/40 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/10">
                       <Download className="h-3.5 w-3.5" />
-                      Download Excel Deliverable (11,408 Rows)
+                      Download Excel Deliverable ({c6.c6_rows.toLocaleString()} Rows)
                     </Button>
                   </a>
                   <Link href="/rates">
@@ -992,6 +993,9 @@ export default function OverviewPage() {
                 </div>
               </div>
             </div>
+
+            {/* C5 Heuristic Scoring Weights Matrix & C6 Multi-Source Verification Breakdown */}
+            <C5C6EvidenceCard totalRows={c6.c6_rows} />
           </CardContent>
         </Card>
 

@@ -189,11 +189,13 @@ make c3          # grade rate files (runs C1–C2 first)     → docs/deliverabl
 make c4          # extract and select rates                → data/stage/c4/selected_rates.csv
 make c5hn        # Health Net PPO evidence, offline replay → data/stage/c5_healthnet/healthnet_evidence.csv
 make c5          # address engine                          → data/stage/c5/c5result.csv
-make c6          # final rate file                         → data/out/final_provider_rates.xlsx (+ .csv)
+make c6          # final rate file                         → data/out/final_provider_rates.xlsx
 make c7          # cost-effectiveness                      → data/out/c7_cost_effectiveness.xlsx
 
 uv run python -m pipeline all                 # same chain without make
 ```
+
+> **Final Deliverables in Repository:** The final provider rates output is committed directly to the repository and located in the `data/` folder at [`data/out/final_provider_rates.xlsx`](data/out/final_provider_rates.xlsx) (with all 36 columns and 11,413 curated rates), along with [`data/out/c2_ppo_network.xlsx`](data/out/c2_ppo_network.xlsx) and [`data/out/c7_cost_effectiveness.xlsx`](data/out/c7_cost_effectiveness.xlsx), so you can inspect them immediately.
 
 ### 4.5 Check the outputs
 
@@ -541,7 +543,7 @@ cd web && npm install && npm run dev          # Next.js dashboard (overview, rat
 
 | # | PS deliverable | Where |
 |---|---|---|
-| 1 | Rate file (NPI, TIN, Address, Billing Code, Specialty, Rate) | `data/out/final_provider_rates.xlsx` (+ the same rows as `final_provider_rates.csv`) |
+| 1 | Rate file (NPI, TIN, Address, Billing Code, Specialty, Rate) | `data/out/final_provider_rates.xlsx` (committed in `data/` folder) |
 | 2 | Logic file (PPO network; TIN → NPI → address) | §7 above · `docs/DECISIONS.md` (every rule ID with evidence) |
 | 3 | File quality metrics | `docs/deliverables/file_quality_metrics.md` · `data/stage/c3/file_metrics.parquet` |
 | 4 | Summary metrics | §1 above · `data/stage/*/_manifest.json` |
@@ -587,6 +589,10 @@ pipeline/rag/              RAG copilot: indexer, DuckDB record lookups, engine, 
 web/                       Next.js dashboard (overview, rates, address, quality, audit, copilot)
 api/                       FastAPI scaffold
 config.yaml · Makefile     configuration and stage orchestration
+data/out/                  committed deliverable workbooks:
+                           - final_provider_rates.xlsx (Deliverable 1: 36 columns, 11,413 rates)
+                           - c2_ppo_network.xlsx (Deliverable 2: PPO network map)
+                           - c7_cost_effectiveness.xlsx (Deliverable 7b: peer benchmarking)
 ```
 
 ---
